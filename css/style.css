@@ -246,3 +246,8 @@ kbd { background:#2b3749; border:1px solid var(--line); border-bottom-width:2px;
 .code-msg { font-size:12px; min-height:16px; margin:-8px 0 10px; text-align:right; }
 .code-msg.ok { color:var(--accent); }
 .code-msg.bad { color:var(--danger); }
+
+/* co-op connect */
+.coop-area { display:flex; flex-direction:column; gap:8px; margin:14px 0; text-align:left; }
+.code-area { width:100%; height:64px; background:#161d29; border:1px solid var(--line); border-radius:9px; color:var(--txt); font-size:10px; font-family:monospace; padding:8px; resize:none; outline:none; }
+.code-area:focus { border-color:var(--accent2); }

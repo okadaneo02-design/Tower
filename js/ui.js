@@ -44,11 +44,13 @@ TD.ui = (function(){
       if (game.startDaily()){ buildBuildBar(); show('hud'); updateHUD(true); } };
     const lab=el('button','btn','🧪&nbsp; MODEL LAB (TEST)');
     lab.onclick=()=>{ TD.Audio.resume(); game.startShowcase(); buildBuildBar(); show('hud'); updateHUD(true); };
+    const coop=el('button','btn','🤝&nbsp; CO-OP (2P)');
+    coop.onclick=()=>{ TD.Audio.resume(); openCoop(); };
     const tech=el('button','btn','🧬&nbsp; TECH TREE');
     tech.onclick=()=>{ TD.Audio.resume(); show('tech'); };
     const set=el('button','btn','⚙&nbsp; SETTINGS');
     set.onclick=()=>{ TD.Audio.resume(); openSettings(); };
-    col.append(play,daily,lab,tech,set);
+    col.append(play,coop,daily,lab,tech,set);
     s.append(col);
     root.append(s); screens.title=s;
   }
@@ -681,5 +683,70 @@ TD.ui = (function(){
     return eng.pickGround(nx,ny);
   }
 
-  return { init, show, banner, toast, bossBar, updateHUD, refreshTowerPanel, showResults, showPerkChoice };
+  /* ============ CO-OP connect flow (swap two codes, no server) ============ */
+  let coopEl=null;
+  function mkArea(v,ro){
+    const t=document.createElement('textarea'); t.className='code-area'; t.value=v; t.readOnly=!!ro;
+    if (ro) t.onclick=()=>{ t.select(); try{ document.execCommand('copy'); toast('Copied!'); }catch(e){} };
+    t.addEventListener('keydown',e=>e.stopPropagation());
+    return t;
+  }
+  function openCoop(){
+    const s=el('div','screen overlay'); coopEl=s;
+    const box=el('div','result-box'); box.style.maxWidth='540px';
+    box.append(el('div','h2','CO-OP · 2 PLAYERS'));
+    box.append(el('div','hint','One of you HOSTS, the other JOINS. Send each other the two codes (any chat app). The host runs the game — you both build from a shared wallet.'));
+    const row=el('div','row-gap');
+    const hostB=el('button','btn primary','HOST');
+    const joinB=el('button','btn','JOIN');
+    row.append(hostB,joinB); box.append(row);
+    const area=el('div','coop-area'); box.append(area);
+    const close=el('button','btn small','CLOSE'); close.onclick=()=>{ s.remove(); coopEl=null; };
+    box.append(close);
+    s.append(box); root.append(s);
+    TD.Net.onOpen=()=>{
+      game.netInit();
+      toast('🤝 Connected!');
+      if (TD.Net.role==='host'){ if(coopEl){coopEl.remove(); coopEl=null;} show('mapselect'); }
+      else area.innerHTML='<div class="hint" style="color:var(--accent)">Connected! Waiting for the host to start the game…</div>';
+    };
+    hostB.onclick=async()=>{
+      area.innerHTML='<div class="hint">generating your code…</div>';
+      try{
+        const code=await TD.Net.host();
+        area.innerHTML='';
+        area.append(el('div','panel-h','1 · Send this code to Player 2 (click = copy)'));
+        area.append(mkArea(code,true));
+        area.append(el('div','panel-h','2 · Paste their reply code, then connect'));
+        const inp=mkArea('',false); area.append(inp);
+        const con=el('button','btn primary','CONNECT');
+        con.onclick=async()=>{ try{ await TD.Net.acceptAnswer(inp.value); con.textContent='CONNECTING…'; }
+          catch(e){ toast('That reply code is invalid'); } };
+        area.append(con);
+      }catch(e){ area.innerHTML='<div class="hint">WebRTC unavailable in this browser.</div>'; }
+    };
+    joinB.onclick=()=>{
+      area.innerHTML='';
+      area.append(el('div','panel-h','1 · Paste the host\'s code'));
+      const inp=mkArea('',false); area.append(inp);
+      const gen=el('button','btn primary','GENERATE REPLY');
+      area.append(gen);
+      gen.onclick=async()=>{
+        try{
+          const reply=await TD.Net.join(inp.value);
+          gen.remove();
+          area.append(el('div','panel-h','2 · Send this reply back to the host (click = copy)'));
+          area.append(mkArea(reply,true));
+          area.append(el('div','hint','Waiting for the host to hit CONNECT…'));
+        }catch(e){ toast('That host code is invalid'); }
+      };
+    };
+  }
+  function netEnterGame(){
+    if (coopEl){ coopEl.remove(); coopEl=null; }
+    buildBuildBar(); show('hud'); updateHUD(true);
+    banner('CO-OP','shared gold — build together!');
+  }
+
+  return { init, show, banner, toast, bossBar, updateHUD, refreshTowerPanel, showResults, showPerkChoice, netEnterGame };
 })();

@@ -12,7 +12,7 @@ TD.CONFIG = {
   SELL_REFUND: 0.7,
   CAMPAIGN_WAVES: 30,
   SLOT_POINTS: 9, BLOCK_SLOTS: 3,
-  BLOCK_LIMIT: 15,            // max block pieces on the field at once
+  BLOCK_LIMIT: 50,            // max block pieces on the field at once
   MAX_ENEMIES: 170,
   MAX_STACK: 2,               // blocks may stack 2 high
   ELEV_RANGE_BONUS: 0.5,      // +range (cells) per block of elevation

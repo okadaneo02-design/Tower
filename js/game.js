@@ -729,6 +729,7 @@ TD.Game = class {
 
   /* ----- run lifecycle ----- */
   startRun(mapId,diffId,loadout,endless){
+    this.cleanupRun(); // full map reset — no ghosts from the last run
     this.map=TD.MAPS[mapId]; this.diffId=diffId; this.diff=TD.DIFFICULTY[diffId];
     this.loadout=loadout; this.endless=endless;
     this.eng.buildMap(this.map);
@@ -793,18 +794,28 @@ TD.Game = class {
     TD.Audio.sfx('place');
     this.eng.ring(this.basePos,4,0x4ade80,0.6);
     if (TD.ui){ TD.ui.banner('DEFENSE READY','build your maze, then start the wave'); TD.ui.refreshTowerPanel(); }
+    if (TD.Net&&TD.Net.connected&&TD.Net.role==='host') this.netMeta();
     return true;
+  }
+  // scorched-earth cleanup — kills every ghost bullet/missile/enemy between runs
+  cleanupRun(){
+    for (const e of this.enemies||[]) this.eng.scene.remove(e.model);
+    for (const t of this.towers||[]) this.eng.scene.remove(t.model);
+    for (const p of this.projectiles||[]){
+      if (p.mesh) p.kind==='missileP'? this.eng.freeMissileMesh(p.mesh) : this.freeShell(p.mesh);
+    }
+    for (const c of this.crates||[]) if(this.eng.mapGroup) this.eng.mapGroup.remove(c.model);
+    this.enemies=[]; this.towers=[]; this.projectiles=[]; this.crates=[]; this.strikes=[];
+    if (this.rangeRing){ this.eng.scene.remove(this.rangeRing); this.rangeRing=null; }
+    if (this.cancelAiming) this.cancelAiming();
+    this.overclockT=0; this.selected=null; this.waveActive=false; this.spawnQueue=[];
+    this.clearGhost();
+    if (TD.ui) TD.ui.bossBar(null);
   }
   quitRun(){
     this.state='menu'; this.showcase=false;
-    for (const e of this.enemies) this.eng.scene.remove(e.model);
-    for (const t of this.towers) this.eng.scene.remove(t.model);
-    for (const c of this.crates||[]) this.eng.mapGroup.remove(c.model);
-    this.crates=[]; this.strikes=[];
-    if (this.cancelAiming) this.cancelAiming();
+    this.cleanupRun();
     this.daily=null; this.rng=null;
-    this.clearGhost();
-    this.enemies=[]; this.towers=[];
   }
   /* ----- MODEL LAB — the TEST map: every unit on display ----- */
   startShowcase(){
@@ -1055,6 +1066,11 @@ TD.Game = class {
     this.eng.burst(b.pos.clone().add(new THREE.Vector3(0,0.4,0)),0x8d99ae,12,4,0.5,6);
   }
   sell(obj){
+    if (this.netGuest){
+      if (obj.isBlock) TD.Net.send({t:'sell',c:obj.c,r:obj.r});
+      else TD.Net.send({t:'sell',i:obj.netIdx});
+      this.select(null); return;
+    }
     const refund=Math.round(obj.spent*this.sellRefund);
     if (obj.isBlock){
       const i=idx(obj.c,obj.r);
@@ -1096,6 +1112,7 @@ TD.Game = class {
   upgrade(t,p){
     const chk=this.canUpgrade(t,p);
     if (!chk.ok){ TD.Audio.sfx('error'); return false; }
+    if (this.netGuest){ TD.Net.send({t:'up',i:t.netIdx,p}); return true; }
     this.gold-=chk.cost; t.spent+=chk.cost; t.tiers[p]++;
     this.recomputeStats();
     this.eng.applyCosmetics(t.model,t.id,t.tiers);
@@ -1121,7 +1138,9 @@ TD.Game = class {
   select(t){
     this.selected=t;
     if (this.rangeRing){ this.eng.scene.remove(this.rangeRing); this.rangeRing=null; }
-    if (t&&!t.isBlock){
+    if (t&&!t.isBlock&&!t.rangeW&&t.stats) t.rangeW=()=>t.stats.range*C.CELL; // net puppets
+    if (t&&!t.isBlock&&t.isCrate) { this.selected=null; return; }
+    if (t&&!t.isBlock&&!t.isCrate){
       this.rangeRing=this.eng.makeRangeRing(t.rangeW(),0x7dd3fc);
       this.rangeRing.position.set(t.pos.x,t.pos.y,t.pos.z);
     }
@@ -1195,7 +1214,13 @@ TD.Game = class {
     if (this.state!=='playing'&&this.state!=='prep') return;
     const c=cellOv||this.eng.worldToCell(world);
     if (!inB(c.c,c.r)) return;
-    if (this.placing){ this.place(c.c,c.r); return; }
+    if (this.placing){
+      if (this.netGuest){
+        TD.Net.send({t:'place', kind:this.placing.kind, id:this.placing.id, c:c.c, r:c.r, rot:this.placingRot});
+        return;
+      }
+      this.place(c.c,c.r); return;
+    }
     const i=idx(c.c,c.r);
     const obj=this.towerMap[i]||this.groundMap[i]||((this.cellStack[i]||[]).slice(-1)[0])||null;
     this.select(obj);
@@ -1244,7 +1269,9 @@ TD.Game = class {
     return q;
   }
   startWave(){
+    if (this.netGuest){ TD.Net.send({t:'wave'}); return; }
     if (this.state!=='playing') return;
+    const netBn=(a,b)=>{ if(TD.Net&&TD.Net.connected&&TD.Net.role==='host') TD.Net.send({t:'bn',a,b}); };
     if (this.waveActive){
       // early call: bonus gold, waves overlap
       const bonus=Math.round((20+this.wave*3)*this.diff.goldMul);
@@ -1254,6 +1281,7 @@ TD.Game = class {
       this.spawnQueue=this.spawnQueue.concat(q).sort((a,b)=>a.t-b.t);
       TD.Audio.sfx('waveStart');
       if (TD.ui) TD.ui.banner('WAVE '+this.wave+' CALLED EARLY','+'+bonus+' gold');
+      netBn('WAVE '+this.wave+' CALLED EARLY','+'+bonus+' gold');
       return;
     }
     this.wave++;
@@ -1261,6 +1289,7 @@ TD.Game = class {
     this.spawnT=0; this.waveActive=true;
     TD.Audio.sfx('waveStart');
     if (TD.ui) TD.ui.banner('WAVE '+this.wave, this.wave%10===0?'⚠ JUGGERNAUT INCOMING ⚠':'');
+    netBn('WAVE '+this.wave, this.wave%10===0?'⚠ JUGGERNAUT INCOMING ⚠':'');
   }
   spawnEnemyAt(type,pos,wave){
     const e=new Enemy(this,type,0,wave);
@@ -1315,6 +1344,7 @@ TD.Game = class {
     const ab=this.abilities&&this.abilities[i];
     if (!ab||this.state!=='playing') return;
     if (ab.charge<ab.def.need){ TD.Audio.sfx('error'); if(TD.ui) TD.ui.toast(ab.def.name+' still charging — kills speed it up'); return; }
+    if (this.netGuest&&ab.def.id!=='orbital'){ TD.Net.send({t:'cast',i}); return; }
     if (ab.def.id==='orbital'){
       this.aiming=ab;
       if (!this.reticle) this.reticle=this.eng.makeReticle(3*C.CELL);
@@ -1340,6 +1370,7 @@ TD.Game = class {
     if (!this.aiming||!world) return;
     const ab=this.aiming; this.aiming=null;
     if (this.reticle) this.reticle.visible=false;
+    if (this.netGuest){ TD.Net.send({t:'cast',i:0,x:world.x,z:world.z}); ab.charge=0; return; }
     ab.charge=0;
     const pos=new THREE.Vector3(world.x,0,world.z);
     this.strikes.push({pos,t:1.2});
@@ -1372,6 +1403,7 @@ TD.Game = class {
     this.crates.push(crate);
   }
   collectCrate(crate){
+    if (this.netGuest){ TD.Net.send({t:'crate',cid:crate.cid}); return; }
     if (!this.crates.includes(crate)) return;
     const gold=Math.round((15+this.wave*2)*this.diff.goldMul);
     this.gold+=gold;
@@ -1418,6 +1450,7 @@ TD.Game = class {
   finish(win){
     this.state=win?'won':'lost';
     this.waveActive=false;
+    if (TD.Net&&TD.Net.connected&&TD.Net.role==='host') TD.Net.send({t:'end',win});
     if (this.daily){
       const score=this.wave*100+this.runKills;
       const prev=(this.save.daily&&this.save.daily.score)||0;
@@ -1671,6 +1704,16 @@ TD.Game = class {
       } else if (b.trapState==='swallow'){
         b.swT-=dt;
         for (const e of onCell()){
+          // the Juggernaut is too big to swallow — it takes 35% max HP and slams the doors
+          if (e.def.boss){
+            if (b.points>=21){ b.points=0;
+              this.hitEnemy(e,Math.round(e.maxHp*0.35),{armorPierce:true});
+              this.eng.shakeCam(0.8);
+              this.eng.burst(e.center(),0x8d99ae,14,4,0.5,6);
+              this.eng.text(e.center(),'-35%','#ffd166',true);
+            }
+            continue;
+          }
           const w=e.hp>600?21:(e.hp>300?7:3);
           if (b.points>=w){ b.points-=w; e.startFalling(); this.eng.burst(e.center(),0x8d99ae,6,2,0.3,6); }
         }
@@ -1700,6 +1743,7 @@ TD.Game = class {
 
   /* ----- main update ----- */
   update(dt){
+    if (this.netGuest){ this.guestTick(dt); return; }  // replica world: host simulates
     if ((this.state!=='playing'&&this.state!=='prep')||this.paused) return;
     if (this.state==='prep') return; // just the ghost, no sim yet
     this.updateAbilities(dt);
@@ -1754,6 +1798,239 @@ TD.Game = class {
     if (this.shieldMax>0){ this.shieldT-=dt;
       if (this.shieldT<=0&&this.shield<this.shieldMax) this.shield=Math.min(this.shieldMax,this.shield+15*dt); }
     if (this.waveActive&&!this.spawnQueue.length&&!this.enemies.length) this.endWave();
+    if (TD.Net&&TD.Net.connected&&TD.Net.role==='host') this.hostSync(dt);
+  }
+};
+TD._applyMod=applyMod;
+})();
+
+/* ============ CO-OP: host-authoritative sync layer ============ */
+(function(){
+const C=TD.CONFIG;
+const TIDX=Object.keys(TD.TOWERS), EIDX=Object.keys(TD.ENEMIES), BIDX=Object.keys(TD.BLOCKS);
+const P=TD.Game.prototype;
+
+P.netInit=function(){
+  const g=this;
+  TD.Net.onMsg=m=>g.netMsg(m);
+  TD.Net.onClose=()=>{ if(TD.ui) TD.ui.toast('⚠ Co-op partner disconnected'); g.netGuest=false; };
+  this._nid=1; this.netT=0;
+  if (TD.Net.role==='guest'){ this.netGuest=true; }
+};
+P.netMsg=function(m){
+  if (TD.Net.role==='host') return this.hostCmd(m);
+  if (m.t==='meta') this.guestMeta(m);
+  else if (m.t==='s') this.guestSnap(m);
+  else if (m.t==='bn'&&TD.ui) TD.ui.banner(m.a,m.b||'');
+  else if (m.t==='toast'&&TD.ui) TD.ui.toast(m.m);
+  else if (m.t==='end'&&TD.ui){ this.state=m.win?'won':'lost'; TD.ui.showResults(m.win); }
+};
+/* ---- host: apply guest commands ---- */
+P.hostCmd=function(m){
+  if (this.state!=='playing'&&this.state!=='prep') return;
+  if (m.t==='place'){
+    this.placingRot=m.rot||0; this.setPlacing(m.kind,m.id);
+    const ok=this.place(m.c,m.r); this.clearGhost();
+    if (!ok) TD.Net.send({t:'toast',m:'Partner: build blocked there'});
+  }
+  else if (m.t==='up'){ const t=this.towers[m.i]; if(t) this.upgrade(t,m.p); }
+  else if (m.t==='sell'){
+    if (m.i!==undefined){ const t=this.towers[m.i]; if(t) this.sell(t); }
+    else { const b=this.blocks.find(b2=>b2.c===m.c&&b2.r===m.r); if(b) this.sell(b); }
+  }
+  else if (m.t==='wave') this.startWave();
+  else if (m.t==='cast'){
+    const ab=this.abilities&&this.abilities[m.i];
+    if (m.i===0&&ab&&ab.charge>=ab.def.need){ this.aiming=ab; this.confirmAbility(new THREE.Vector3(m.x,0,m.z)); }
+    else this.castAbility(m.i);
+  }
+  else if (m.t==='crate'){ const cr=this.crates.find(c2=>c2.cid===m.cid); if(cr) this.collectCrate(cr); }
+};
+P.netMeta=function(){
+  if (!TD.Net.connected||TD.Net.role!=='host'||!this.map) return;
+  TD.Net.send({t:'meta', map:this.map.id, diff:this.diffId, loadout:this.loadout,
+    baseC:this.baseC, baseR:this.baseR});
+};
+P.hostSync=function(dt){
+  this.netT=(this.netT||0)-dt;
+  if (this.netT>0) return;
+  this.netT=0.085;
+  const en=this.enemies.map(e=>{
+    if (!e.nid) e.nid=this._nid++;
+    return [e.nid, EIDX.indexOf(e.type), +e.pos.x.toFixed(1), +e.pos.z.toFixed(1),
+      +e.model.rotation.y.toFixed(1), +(e.hp/e.maxHp).toFixed(2),
+      (e._wasHidden?1:0)|(e.burrowed?2:0)|(e.absorbing?4:0)];
+  });
+  const tw=this.towers.map((t,i)=>[i,TIDX.indexOf(t.id),t.c,t.r,t.tiers[0],t.tiers[1],t.tiers[2],t.elev||0,t.kills]);
+  const bl=this.blocks.map(b=>[BIDX.indexOf(b.def.id),b.c,b.r,(b.model.rotation.y>0.5?1:0),b.level||0,
+    (b.trapState==='opening'||b.trapState==='swallow')?1:0]);
+  const cr=this.crates.map(c2=>{ if(!c2.cid) c2.cid=this._nid++; return [c2.cid,+c2.pos.x.toFixed(1),+c2.pos.z.toFixed(1)]; });
+  TD.Net.send({t:'s', g:Math.floor(this.gold), bh:Math.ceil(this.baseHp), bm:this.baseMaxHp,
+    sh:Math.ceil(this.shield||0), w:this.wave, wa:this.waveActive?1:0,
+    ab:this.abilities? this.abilities.map(a=>+(a.charge/a.def.need).toFixed(2)) : [], en, tw, bl, cr});
+};
+/* ---- guest: replica world ---- */
+P.puppetStats=function(id,tiers,elev){
+  const d=TD.TOWERS[id];
+  const s={ range:d.range, rof:d.rof, dmg:d.dmg, pellets:d.pellets||0, cone:d.cone||0, splash:d.splash||0,
+    minRange:d.minRange||0, chain:d.chain||0, chainRange:d.chainRange||0, volley:d.volley||1,
+    slow:d.slow||0, slowDur:d.slowDur||0, burnDps:d.burnDps||0, burnDur:d.burnDur||0,
+    poisonDps:d.poisonDps||0, poisonDur:d.poisonDur||0, stacks:d.stacks||0,
+    mark:d.mark||0, markDur:d.markDur||0, detect:!!d.detect, aim:1, proj:1,
+    heal:d.heal||0, goldWave:d.goldWave||0, interest:0, killGold:0,
+    buffDmg:d.buffDmg||0, buffRof:0, buffRange:0, buffDetect:false,
+    armorPierce:false, critProb:0, critMul:2, stunProb:0, stunDur:0, pierce:0,
+    freezeProb:0, freezeDur:0, spreadOnDeath:false, lowBoost:false, baseHpMul:1, shield:0, targets:d.targets };
+  tiers.forEach((tier,pi)=>{ for(let k=0;k<tier;k++) TD._applyMod(s,d.paths[pi].tiers[k].mod); });
+  s.range+=(elev||0)*C.ELEV_RANGE_BONUS;
+  return s;
+};
+P.guestMeta=function(m){
+  this.map=TD.MAPS[m.map]; this.diffId=m.diff; this.diff=TD.DIFFICULTY[m.diff];
+  this.loadout=m.loadout;
+  this.eng.buildMap(this.map); this.eng.resetCam();
+  this.puppets={en:new Map(),tw:new Map(),bl:new Map(),cr:new Map()};
+  this.gold=0; this.wave=0; this.baseMaxHp=1; this.baseHp=1;
+  this.perks=[]; this.abilities=TD.ABILITIES.map(a=>({def:a,charge:0}));
+  this.state='playing';
+  if (m.baseC!==undefined&&m.baseC!==null){
+    this.baseC=m.baseC; this.baseR=m.baseR;
+    const p1=this.eng.cellToWorld(m.baseC,m.baseR), p2=this.eng.cellToWorld(m.baseC+1,m.baseR+1);
+    this.basePos=new THREE.Vector3((p1.x+p2.x)/2,0,(p1.z+p2.z)/2);
+    this.baseModel=this.eng.makeBase(); this.baseModel.position.copy(this.basePos);
+    this.eng.mapGroup.add(this.baseModel);
+    this.eng.focus(this.basePos.x,this.basePos.z);
+  }
+  if (TD.ui) TD.ui.netEnterGame();
+};
+P.guestSnap=function(m){
+  if (!this.puppets) return;
+  this.gold=m.g; this.baseHp=m.bh; this.baseMaxHp=m.bm;
+  this.shield=m.sh; this.shieldMax=m.sh>0?m.sh:0;
+  this.wave=m.w; this.waveActive=!!m.wa;
+  if (this.abilities&&m.ab) m.ab.forEach((f,i)=>{ if(this.abilities[i]) this.abilities[i].charge=f*this.abilities[i].def.need; });
+  if (this.baseModel) this.eng.setBaseStress(this.baseModel,Math.max(0,this.baseHp/this.baseMaxHp));
+  const seen=new Set();
+  for (const r of m.en){
+    const [nid,ti,x,z,ry,hf,fl]=r; seen.add(nid);
+    let p=this.puppets.en.get(nid);
+    if (!p){
+      const type=EIDX[ti];
+      p={ model:this.eng.makeEnemy(type), type, tx:x, tz:z, hidden:false };
+      p.model.position.set(x,0,z);
+      this.eng.scene.add(p.model);
+      this.puppets.en.set(nid,p);
+    }
+    p.tx=x; p.tz=z; p.try=ry;
+    const hidden=!!(fl&1);
+    if (p.hidden!==hidden){ this.eng.setStealth(p.model,hidden); p.hidden=hidden; }
+    p.model.position.y=(fl&2)?-0.9:0;
+    if (fl&4) p.model.scale.multiplyScalar(0.93);
+  }
+  for (const [nid,p] of this.puppets.en) if (!seen.has(nid)){
+    this.eng.explosion(p.model.position.clone().setY(0.8),1,0xff9d5c);
+    this.eng.scene.remove(p.model); this.puppets.en.delete(nid);
+  }
+  const tseen=new Set();
+  for (const r of m.tw){
+    const [i,ti,c2,r2,t0,t1,t2,elev,kills]=r;
+    const key=c2+'_'+r2; tseen.add(key);
+    let p=this.puppets.tw.get(key);
+    const id=TIDX[ti];
+    if (!p){
+      const w=this.eng.cellToWorld(c2,r2); w.y=(elev||0)*1.51;
+      p={ model:this.eng.makeTower(id), id, def:TD.TOWERS[id], c:c2, r:r2, tiers:[t0,t1,t2],
+          netIdx:i, kills, elev, isBlock:false, cd:0, pos:w, mode:0, aim:0 };
+      p.stats=this.puppetStats(id,p.tiers,elev);
+      p.spent=p.def.cost;
+      p.rangeW=()=>p.stats.range*C.CELL;
+      p.model.position.copy(w); p.model.userData.owner=p;
+      this.eng.scene.add(p.model);
+      this.eng.applyCosmetics(p.model,id,p.tiers);
+      this.puppets.tw.set(key,p);
+    }
+    p.netIdx=i; p.kills=kills;
+    if (p.tiers[0]!==t0||p.tiers[1]!==t1||p.tiers[2]!==t2){
+      p.tiers=[t0,t1,t2];
+      p.stats=this.puppetStats(id,p.tiers,p.elev);
+      this.eng.applyCosmetics(p.model,id,p.tiers);
+      if (this.selected===p&&TD.ui) TD.ui.refreshTowerPanel();
+    }
+  }
+  for (const [key,p] of this.puppets.tw) if (!tseen.has(key)){
+    if (this.selected===p) this.select(null);
+    this.eng.scene.remove(p.model); this.puppets.tw.delete(key);
+  }
+  const bseen=new Set();
+  for (const r of m.bl){
+    const [bi,c2,r2,rot,lvl,open]=r;
+    const key=c2+'_'+r2+'_'+lvl; bseen.add(key);
+    let p=this.puppets.bl.get(key);
+    if (!p){
+      const id=BIDX[bi], def=TD.BLOCKS[id];
+      p={ model:this.eng.makeBlock(id), id };
+      let w;
+      if (def.len===2){
+        const a=this.eng.cellToWorld(c2,r2), b2=this.eng.cellToWorld(rot?c2+1:c2, rot?r2:r2+1);
+        w=new THREE.Vector3((a.x+b2.x)/2,0,(a.z+b2.z)/2);
+        p.model.rotation.y=rot?Math.PI/2:0;
+      } else w=this.eng.cellToWorld(c2,r2);
+      w.y=(id==='block')?lvl*1.51:0;
+      p.model.position.copy(w);
+      p.model.userData.owner={ isBlock:true, def, c:c2, r:r2, spent:def.cost, uses:def.uses||0, level:lvl, net:true };
+      this.eng.mapGroup.add(p.model);
+      this.puppets.bl.set(key,p);
+    }
+    if (p.model.userData.doors) this.eng.setTrapOpen(p.model, open?1:0);
+  }
+  for (const [key,p] of this.puppets.bl) if (!bseen.has(key)){
+    this.eng.mapGroup.remove(p.model); this.puppets.bl.delete(key);
+  }
+  const cseen=new Set();
+  for (const [cid,x,z] of m.cr){
+    cseen.add(cid);
+    if (!this.puppets.cr.has(cid)){
+      const model=this.eng.makeCrate(); model.position.set(x,0,z);
+      model.userData.owner={ isCrate:true, cid };
+      this.eng.mapGroup.add(model);
+      this.puppets.cr.set(cid,{model,cid});
+    }
+  }
+  for (const [cid,p] of this.puppets.cr) if (!cseen.has(cid)){
+    this.eng.mapGroup.remove(p.model); this.puppets.cr.delete(cid);
+  }
+};
+P.guestTick=function(dt){
+  if (!this.puppets) return;
+  for (const [,p] of this.puppets.en){
+    const k=Math.min(1,dt*10);
+    p.model.position.x+=(p.tx-p.model.position.x)*k;
+    p.model.position.z+=(p.tz-p.model.position.z)*k;
+    if (p.try!==undefined) p.model.rotation.y+=(p.try-p.model.rotation.y)*k;
+    this.eng.animEnemy(p.model,dt,1);
+  }
+  // cosmetic fire so the guest's world feels alive
+  for (const [,t] of this.puppets.tw){
+    if (!t.def.rof) continue;
+    t.cd-=dt;
+    let best=null,bd=1e9;
+    const rw=t.rangeW();
+    for (const [,p] of this.puppets.en){
+      const dx=p.model.position.x-t.pos.x, dz=p.model.position.z-t.pos.z, d2=dx*dx+dz*dz;
+      if (d2<rw*rw&&d2<bd){ bd=d2; best=p; }
+    }
+    if (best){
+      const u=t.model.userData;
+      if (u.head) u.head.rotation.y=Math.atan2(best.model.position.x-t.pos.x, best.model.position.z-t.pos.z);
+      if (t.cd<=0){
+        t.cd=1/t.stats.rof;
+        const mp=t.pos.clone().add(new THREE.Vector3(0,1.4,0));
+        const tp=best.model.position.clone().setY(0.8);
+        if (['gun','sniper','rail','flak'].includes(t.def.arche)) this.eng.beam(mp,tp,t.def.color,0.05,0.07);
+        else if (t.def.arche==='frost'||t.def.arche==='echo') this.eng.ring(t.pos,rw*0.6,t.def.color,0.3);
+        this.eng.muzzleFlash(mp,0xffe8a0,0.7);
+      }
+    }
   }
 };
 })();
