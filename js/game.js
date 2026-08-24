@@ -1814,8 +1814,24 @@ P.netInit=function(){
   const g=this;
   TD.Net.onMsg=m=>g.netMsg(m);
   TD.Net.onClose=()=>{ if(TD.ui) TD.ui.toast('⚠ Co-op partner disconnected'); g.netGuest=false; };
-  this._nid=1; this.netT=0;
+  this._nid=1; this.netT=0; this.netFx=[];
   if (TD.Net.role==='guest'){ this.netGuest=true; }
+  // host: mirror every real FX call to the guest (true fidelity, not fakes)
+  if (TD.Net.role==='host'&&!this.eng._netWrapped){
+    const eng=this.eng; eng._netWrapped=true;
+    const push=ev=>{ if(TD.Net.connected&&g.netFx&&g.netFx.length<90) g.netFx.push(ev); };
+    const f2=v=>+v.toFixed(1);
+    const oBeam=eng.beam.bind(eng);
+    eng.beam=(a,b,c2,th,li)=>{ oBeam(a,b,c2,th,li); push(['b',f2(a.x),f2(a.y),f2(a.z),f2(b.x),f2(b.y),f2(b.z),c2,th||0.08]); };
+    const oExp=eng.explosion.bind(eng);
+    eng.explosion=(p,r,c2)=>{ oExp(p,r,c2); push(['e',f2(p.x),f2(p.y||1),f2(p.z),f2(r||1),c2||0xffa94d]); };
+    const oLtn=eng.lightning.bind(eng);
+    eng.lightning=(a,b,c2,li)=>{ oLtn(a,b,c2,li); push(['l',f2(a.x),f2(a.y),f2(a.z),f2(b.x),f2(b.y),f2(b.z),c2]); };
+    const oRing=eng.ring.bind(eng);
+    eng.ring=(p,r,c2,li)=>{ oRing(p,r,c2,li); push(['r',f2(p.x),f2(p.z),f2(r||1),c2]); };
+    const oMuz=eng.muzzleFlash.bind(eng);
+    eng.muzzleFlash=(p,c2,s2)=>{ oMuz(p,c2,s2); push(['m',f2(p.x),f2(p.y),f2(p.z),c2||0xffe8a0,s2||1]); };
+  }
 };
 P.netMsg=function(m){
   if (TD.Net.role==='host') return this.hostCmd(m);
@@ -1859,7 +1875,12 @@ P.hostSync=function(dt){
     if (!e.nid) e.nid=this._nid++;
     return [e.nid, EIDX.indexOf(e.type), +e.pos.x.toFixed(1), +e.pos.z.toFixed(1),
       +e.model.rotation.y.toFixed(1), +(e.hp/e.maxHp).toFixed(2),
-      (e._wasHidden?1:0)|(e.burrowed?2:0)|(e.absorbing?4:0)];
+      (e._wasHidden?1:0)|(e.burrowed?2:0)|(e.absorbing?4:0)|((e.escorts&&e.escorts.some(x=>!x.dead))?8:0)];
+  });
+  // replicated projectiles: guest renders the REAL shells and missiles
+  const pr=this.projectiles.map(p=>{
+    const pos=p.kind==='arc'? (p.mesh?p.mesh.position:p.from) : p.pos;
+    return [p.kind==='missileP'?1:0, +pos.x.toFixed(1), +pos.y.toFixed(1), +pos.z.toFixed(1)];
   });
   const tw=this.towers.map((t,i)=>[i,TIDX.indexOf(t.id),t.c,t.r,t.tiers[0],t.tiers[1],t.tiers[2],t.elev||0,t.kills]);
   const bl=this.blocks.map(b=>[BIDX.indexOf(b.def.id),b.c,b.r,(b.model.rotation.y>0.5?1:0),b.level||0,
@@ -1867,7 +1888,8 @@ P.hostSync=function(dt){
   const cr=this.crates.map(c2=>{ if(!c2.cid) c2.cid=this._nid++; return [c2.cid,+c2.pos.x.toFixed(1),+c2.pos.z.toFixed(1)]; });
   TD.Net.send({t:'s', g:Math.floor(this.gold), bh:Math.ceil(this.baseHp), bm:this.baseMaxHp,
     sh:Math.ceil(this.shield||0), w:this.wave, wa:this.waveActive?1:0,
-    ab:this.abilities? this.abilities.map(a=>+(a.charge/a.def.need).toFixed(2)) : [], en, tw, bl, cr});
+    ab:this.abilities? this.abilities.map(a=>+(a.charge/a.def.need).toFixed(2)) : [],
+    en, tw, bl, cr, pr, fx:this.netFx.splice(0)});
 };
 /* ---- guest: replica world ---- */
 P.puppetStats=function(id,tiers,elev){
@@ -1886,6 +1908,11 @@ P.puppetStats=function(id,tiers,elev){
   return s;
 };
 P.guestMeta=function(m){
+  if (this.puppets){ // re-entering: clear the old replica completely
+    for (const [,p] of this.puppets.en) this.eng.scene.remove(p.model);
+    for (const [,p] of this.puppets.tw) this.eng.scene.remove(p.model);
+    for (const p of (this.puppets.pr||[])) if(p.mesh) p.kind===1? this.eng.freeMissileMesh(p.mesh):this.freeShell(p.mesh);
+  }
   this.map=TD.MAPS[m.map]; this.diffId=m.diff; this.diff=TD.DIFFICULTY[m.diff];
   this.loadout=m.loadout;
   this.eng.buildMap(this.map); this.eng.resetCam();
@@ -1926,6 +1953,11 @@ P.guestSnap=function(m){
     if (p.hidden!==hidden){ this.eng.setStealth(p.model,hidden); p.hidden=hidden; }
     p.model.position.y=(fl&2)?-0.9:0;
     if (fl&4) p.model.scale.multiplyScalar(0.93);
+    // boss escort shield dome
+    if (TD.ENEMIES[p.type]&&TD.ENEMIES[p.type].boss){
+      if (!p.dome){ p.dome=this.eng.makeBossDome(); p.model.add(p.dome); }
+      p.dome.visible=!!(fl&8);
+    }
   }
   for (const [nid,p] of this.puppets.en) if (!seen.has(nid)){
     this.eng.explosion(p.model.position.clone().setY(0.8),1,0xff9d5c);
@@ -1999,6 +2031,35 @@ P.guestSnap=function(m){
   for (const [cid,p] of this.puppets.cr) if (!cseen.has(cid)){
     this.eng.mapGroup.remove(p.model); this.puppets.cr.delete(cid);
   }
+  // real projectiles, replicated (reconciled by index — visual only)
+  if (!this.puppets.pr) this.puppets.pr=[];
+  const prs=m.pr||[];
+  while (this.puppets.pr.length<prs.length){
+    this.puppets.pr.push({ kind:-1, mesh:null, tx:0, ty:0, tz:0 });
+  }
+  while (this.puppets.pr.length>prs.length){
+    const p=this.puppets.pr.pop();
+    if (p.mesh) p.kind===1? this.eng.freeMissileMesh(p.mesh) : this.freeShell(p.mesh);
+  }
+  prs.forEach((r,i)=>{
+    const [kind,x,y,z]=r, p=this.puppets.pr[i];
+    if (p.kind!==kind){
+      if (p.mesh) p.kind===1? this.eng.freeMissileMesh(p.mesh) : this.freeShell(p.mesh);
+      p.kind=kind;
+      p.mesh=kind===1? this.eng.getMissileMesh() : this.getShellMesh(0xffd28a,0.13);
+      p.mesh.position.set(x,y,z);
+    }
+    p.tx=x; p.ty=y; p.tz=z;
+  });
+  // replayed real FX from the host (beams, explosions, lightning, rings, flashes)
+  for (const f of (m.fx||[])){
+    const tag=f[0];
+    if (tag==='b') this.eng.beam(new THREE.Vector3(f[1],f[2],f[3]),new THREE.Vector3(f[4],f[5],f[6]),f[7],f[8]);
+    else if (tag==='e') this.eng.explosion(new THREE.Vector3(f[1],f[2],f[3]),f[4],f[5]);
+    else if (tag==='l') this.eng.lightning(new THREE.Vector3(f[1],f[2],f[3]),new THREE.Vector3(f[4],f[5],f[6]),f[7]);
+    else if (tag==='r') this.eng.ring(new THREE.Vector3(f[1],0,f[2]),f[3],f[4]);
+    else if (tag==='m') this.eng.muzzleFlash(new THREE.Vector3(f[1],f[2],f[3]),f[4],f[5]);
+  }
 };
 P.guestTick=function(dt){
   if (!this.puppets) return;
@@ -2009,10 +2070,9 @@ P.guestTick=function(dt){
     if (p.try!==undefined) p.model.rotation.y+=(p.try-p.model.rotation.y)*k;
     this.eng.animEnemy(p.model,dt,1);
   }
-  // cosmetic fire so the guest's world feels alive
+  // heads track the nearest hostile (fire FX arrive replicated from the host)
   for (const [,t] of this.puppets.tw){
     if (!t.def.rof) continue;
-    t.cd-=dt;
     let best=null,bd=1e9;
     const rw=t.rangeW();
     for (const [,p] of this.puppets.en){
@@ -2022,14 +2082,18 @@ P.guestTick=function(dt){
     if (best){
       const u=t.model.userData;
       if (u.head) u.head.rotation.y=Math.atan2(best.model.position.x-t.pos.x, best.model.position.z-t.pos.z);
-      if (t.cd<=0){
-        t.cd=1/t.stats.rof;
-        const mp=t.pos.clone().add(new THREE.Vector3(0,1.4,0));
-        const tp=best.model.position.clone().setY(0.8);
-        if (['gun','sniper','rail','flak'].includes(t.def.arche)) this.eng.beam(mp,tp,t.def.color,0.05,0.07);
-        else if (t.def.arche==='frost'||t.def.arche==='echo') this.eng.ring(t.pos,rw*0.6,t.def.color,0.3);
-        this.eng.muzzleFlash(mp,0xffe8a0,0.7);
-      }
+    }
+  }
+  // smooth-move replicated projectiles + missile trails
+  if (this.puppets.pr) for (const p of this.puppets.pr){
+    if (!p.mesh) continue;
+    const k=Math.min(1,dt*14);
+    p.mesh.position.x+=(p.tx-p.mesh.position.x)*k;
+    p.mesh.position.y+=(p.ty-p.mesh.position.y)*k;
+    p.mesh.position.z+=(p.tz-p.mesh.position.z)*k;
+    if (p.kind===1){
+      p.mesh.lookAt(p.tx,p.ty,p.tz);
+      if (Math.random()<0.7) this.eng.burst(p.mesh.position.clone(),0xffb36b,1,0.4,0.14,0);
     }
   }
 };

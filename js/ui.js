@@ -711,34 +711,32 @@ TD.ui = (function(){
       else area.innerHTML='<div class="hint" style="color:var(--accent)">Connected! Waiting for the host to start the game…</div>';
     };
     hostB.onclick=async()=>{
-      area.innerHTML='<div class="hint">generating your code…</div>';
+      area.innerHTML='<div class="hint">creating your room…</div>';
       try{
         const code=await TD.Net.host();
         area.innerHTML='';
-        area.append(el('div','panel-h','1 · Send this code to Player 2 (click = copy)'));
-        area.append(mkArea(code,true));
-        area.append(el('div','panel-h','2 · Paste their reply code, then connect'));
-        const inp=mkArea('',false); area.append(inp);
-        const con=el('button','btn primary','CONNECT');
-        con.onclick=async()=>{ try{ await TD.Net.acceptAnswer(inp.value); con.textContent='CONNECTING…'; }
-          catch(e){ toast('That reply code is invalid'); } };
-        area.append(con);
-      }catch(e){ area.innerHTML='<div class="hint">WebRTC unavailable in this browser.</div>'; }
+        area.append(el('div','panel-h','Give Player 2 this code'));
+        const big=el('div','code-big',code.slice(0,3)+' '+code.slice(3));
+        big.onclick=()=>{ navigator.clipboard&&navigator.clipboard.writeText(code); toast('Copied!'); };
+        area.append(big);
+        area.append(el('div','hint','Waiting for Player 2 to join… (keep this open)'));
+      }catch(e){ area.innerHTML='<div class="hint">Could not reach the matchmaking service — check your internet.</div>'; }
     };
     joinB.onclick=()=>{
       area.innerHTML='';
-      area.append(el('div','panel-h','1 · Paste the host\'s code'));
-      const inp=mkArea('',false); area.append(inp);
-      const gen=el('button','btn primary','GENERATE REPLY');
-      area.append(gen);
-      gen.onclick=async()=>{
-        try{
-          const reply=await TD.Net.join(inp.value);
-          gen.remove();
-          area.append(el('div','panel-h','2 · Send this reply back to the host (click = copy)'));
-          area.append(mkArea(reply,true));
-          area.append(el('div','hint','Waiting for the host to hit CONNECT…'));
-        }catch(e){ toast('That host code is invalid'); }
+      area.append(el('div','panel-h','Enter the host\'s 6-digit code'));
+      const inp=document.createElement('input');
+      inp.type='text'; inp.maxLength=7; inp.placeholder='000 000'; inp.className='code-big code-entry';
+      inp.addEventListener('keydown',e=>{ e.stopPropagation(); if(e.key==='Enter') go.click(); });
+      area.append(inp);
+      const go=el('button','btn primary','CONNECT');
+      area.append(go);
+      go.onclick=async()=>{
+        const code=inp.value.replace(/\D/g,'');
+        if (code.length!==6){ toast('Enter all 6 digits'); return; }
+        go.textContent='CONNECTING…'; go.disabled=true;
+        try{ await TD.Net.join(code); }
+        catch(e){ toast('No host found for that code'); go.textContent='CONNECT'; go.disabled=false; }
       };
     };
   }

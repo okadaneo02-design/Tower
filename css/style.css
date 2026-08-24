@@ -251,3 +251,9 @@ kbd { background:#2b3749; border:1px solid var(--line); border-bottom-width:2px;
 .coop-area { display:flex; flex-direction:column; gap:8px; margin:14px 0; text-align:left; }
 .code-area { width:100%; height:64px; background:#161d29; border:1px solid var(--line); border-radius:9px; color:var(--txt); font-size:10px; font-family:monospace; padding:8px; resize:none; outline:none; }
 .code-area:focus { border-color:var(--accent2); }
+
+/* 6-digit co-op code */
+.code-big { font-size:38px; font-weight:900; letter-spacing:8px; text-align:center; color:var(--accent);
+  background:#101823; border:1px solid var(--line); border-radius:12px; padding:14px 10px; cursor:pointer; }
+.code-entry { width:100%; outline:none; color:var(--txt); }
+.code-entry:focus { border-color:var(--accent2); }
