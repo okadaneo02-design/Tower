@@ -45,6 +45,15 @@ TD.MAPS = [
     pal:{ ground:0xc7a184, ground2:0xb89378, rock:0x9a8573, sky:0x665743 }, seed:129, rockN:12, mtnN:4 },
   { id:4, name:'Ashfall',      desc:'Burned peaks. Everything comes at once.', weather:'ash',
     pal:{ ground:0xc79a8f, ground2:0xb98a80, rock:0x8a7a76, sky:0x665057 }, seed:200, rockN:9, mtnN:3 },
+  { id:5, name:'New Tower City', desc:'Skyline rooftop defense — turrets on buildings rule the streets.', weather:'city',
+    pal:{ ground:0x46525e, ground2:0x3b4550, rock:0x8a93a3, sky:0x2b3350 }, seed:314, rockN:0, mtnN:0, traffic:true,
+    bldgs:[ [5,4,2],[8,4,3],[11,4,2],[14,4,3],
+      [5,7,3],[8,7,2],[11,7,3],[14,7,2],[17,7,2],
+      [5,11,2],[8,11,3],[11,11,2],[14,11,3],[17,11,3],
+      [6,15,3],[9,15,2],[12,15,3],[15,15,2],
+      [6,19,2],[9,19,3],[12,19,2],[15,19,3],[18,19,2],
+      [5,23,3],[8,23,2],[11,23,3],[14,23,2],
+      [20,12,2],[22,16,3],[21,20,2] ] },
 ];
 // deterministic terrain per map: scattered rocks + mountain clusters
 TD.mapTerrain = function(map){
@@ -446,9 +455,31 @@ laser: { id:'laser', name:'Laser Emitter', role:'Continuous beam', cost:300, slo
     {name:'Liquid Core',cost:380, desc:'+25% rate, +2 dmg', mod:{rofMul:1.25, dmgAdd:2}},
     {name:'Dual Pumps',cost:800,  desc:'+30% rate', mod:{rofMul:1.3}},
     {name:'OVERDRIVE', cost:1750, desc:'+35% rate, +4 dmg', mod:{rofMul:1.35, dmgAdd:4}}]}]},
+
+vacuum: { id:'vacuum', name:'The Vacuum', role:'Crate magnet', cost:120, slotCost:1, color:0x86efac, icon:'',
+  desc:'Sucks every crate in range into its intake for instant gold. No ammo — pure suction.', targets:'-', arche:'vacuum', range:5, rof:2, dmg:0, sfx:'ping',
+  paths:[
+   {name:'Suction', tiers:[
+    {name:'Boost Fan',   cost:50,   desc:'+25% pull speed', mod:{vacPullMul:1.25}},
+    {name:'Twin Fans',   cost:120,  desc:'+25% pull speed', mod:{vacPullMul:1.25}},
+    {name:'Turbine',     cost:260,  desc:'+30% pull speed', mod:{vacPullMul:1.3}},
+    {name:'Jet Engine',  cost:520,  desc:'+35% pull speed', mod:{vacPullMul:1.35}},
+    {name:'BLACK HOLE',  cost:1100, desc:'+50% pull speed', mod:{vacPullMul:1.5}}]},
+   {name:'Field', tiers:[
+    {name:'Bigger Bell', cost:60,   desc:'+1 range', mod:{rangeAdd:1}},
+    {name:'Wide Field',  cost:140,  desc:'+1.5 range', mod:{rangeAdd:1.5}},
+    {name:'Urban Sweep', cost:320,  desc:'+2 range', mod:{rangeAdd:2}},
+    {name:'Block Radius',cost:700,  desc:'+3 range', mod:{rangeAdd:3}},
+    {name:'WORLD SUCK',  cost:1500, desc:'+99 range — the whole map!', mod:{rangeAdd:99}}]},
+   {name:'Recycling', tiers:[
+    {name:'Scrap Separator', cost:50,  desc:'+20% crate value', mod:{vacValMul:1.2}},
+    {name:'Refinery',       cost:120, desc:'+25% crate value', mod:{vacValMul:1.25}},
+    {name:'Gold Refinery',  cost:260, desc:'+30% crate value', mod:{vacValMul:1.3}},
+    {name:'Mint',           cost:540, desc:'+35% crate value', mod:{vacValMul:1.35}},
+    {name:'PRIVATE MINT',   cost:1150,desc:'+50% crate value', mod:{vacValMul:1.5}}]}]},
 };
 TD.PATH_TAGS = ['RATE','SYSTEMS','POWER'];
-TD.DEFAULT_UNLOCKED = ['mg','sniper','minigun','flame','laser'];
+TD.DEFAULT_UNLOCKED = ['mg','sniper','minigun','flame','laser','vacuum'];
 
 /* ---------------- TECH TREE ---------------- */
 TD.TECH = [

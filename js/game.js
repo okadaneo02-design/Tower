@@ -21,6 +21,8 @@ function applyMod(s,m){
       case 'chainAdd': s.chain+=v; break;
       case 'chainRangeAdd': s.chainRange+=v; break;
       case 'volleyAdd': s.volley+=v; break;
+      case 'vacPullMul': s.vacPullMul*=v; break;
+      case 'vacValMul': s.vacValMul*=v; break;
       case 'minRangeSub': s.minRange=Math.max(0,s.minRange-v); break;
       case 'slowAdd': s.slow+=v; break;
       case 'slowDur': s.slowDur=Math.max(s.slowDur,v); break;
@@ -107,6 +109,7 @@ class Tower {
       freezeProb:0, freezeDur:0, spreadOnDeath:false, lowBoost:false, baseHpMul:1, shield:0,
       aaDmg:d.aaDmg||0, aaRof:d.aaRof||0, planeN:d.planeN||0, planeSpd:d.planeSpd||1,
       planeDmg:d.planeDmg||0, bombDmg:d.bombDmg||0, heliRange:d.heliRange||6, chargeT:d.chargeT||0.6, ability:null,
+      vacPullMul:1, vacValMul:1,
       targets:d.targets };
     this.tiers.forEach((tier,pi)=>{ for(let k=0;k<tier;k++) applyMod(s, d.paths[pi].tiers[k].mod); });
     s.dmg*=1+g.techDmg; s.range*=1+g.techRange;
@@ -183,6 +186,27 @@ class Tower {
     }
     const arche=this.def.arche;
     if (arche==='aura'||arche==='bank'||arche==='repair') return;
+    if (arche==='vacuum'){
+      // sucks every crate in range straight into the intake
+      const g2=this.game, R=s.range*C.CELL;
+      for (const c of g2.crates){
+        const dx=this.pos.x-c.pos.x, dz=this.pos.z-c.pos.z;
+        const d2=dx*dx+dz*dz;
+        if (d2>R*R) continue;
+        const d=Math.sqrt(d2);
+        if (d<1.15*C.CELL){ g2.collectCrate(c,s.vacValMul); continue; }
+        const force=Math.min(1,1.6-d/R);
+        const spd=(6+s.vacPullMul*8)*C.CELL;
+        c.pos.x+=dx/d*dt*spd*force; c.pos.z+=dz/d*dt*spd*force;
+        c.model.position.x=c.pos.x; c.model.position.z=c.pos.z;
+        c.model.rotation.y+=dt*4;
+        if (Math.random()<dt*7) g2.eng.sqBurst(c.pos.clone().setY(0.7),[0x9ff0c8,0xd8f7ea],1,1.8,0.25,0.6);
+      }
+      const refs=this.animRefs||{}, g3=this.game;
+      if (refs.spin) refs.spin.rotation.y+=dt*(8+s.vacPullMul*6);
+      if (refs.lens) refs.lens.material.emissiveIntensity=1.3+Math.sin(g3.eng.time*7)*0.5;
+      return;
+    }
     const noAim = arche==='frost'||arche==='echo'||arche==='tesla';
     if (this.target && (this.target.dead||!this.inRange(this.target)||!this.canSee(this.target))) this.target=null;
     if (!this.target) this.target=this.pickTarget();
@@ -872,7 +896,7 @@ TD.Game = class {
     for (const br of TD.TECH) for (const n of br.nodes) if (n.unlock&&this.techHas(n.id)) set.add(n.unlock);
     return set;
   }
-  mapUnlocked(i){ return i===0||this.save.maps[i-1].stars.length>0; }
+  mapUnlocked(i){ return !!(this.save.allMapsUnlocked)||i===0||this.save.maps[i-1].stars.length>0; }
   hasPerk(id){ return !!this.perks&&this.perks.includes(id); }
   rand(){ return this.rng? this.rng() : Math.random(); }
   costOf(kind,def){
@@ -953,6 +977,8 @@ TD.Game = class {
     this.stackH=new Uint8Array(G*G);
     this.towerMap={}; this.groundMap={}; this.cellStack={};
     for (const [c,r] of this.map._rocks) this.cells[idx(c,r)]=1;
+    this.bldgH=new Uint8Array(G*G);
+    for (const [c,r,h] of (this.map._bldgs||this.map.bldgs||[])){ this.cells[idx(c,r)]=1; this.bldgH[idx(c,r)]=h*5; }
     this.towers=[]; this.enemies=[]; this.projectiles=[]; this.blocks=[];
     this.gold=Math.round((this.diff.startGold+this.techStartGold+this.codeGoldBonus())*C.START_GOLD_MUL);
     this.baseMaxHp=Math.round(this.diff.baseHp*(1+this.techBaseHp));
@@ -960,7 +986,7 @@ TD.Game = class {
     this.shieldMax=0; this.shield=0; this.shieldT=0;
     this.wave=0; this.waveActive=false; this.spawnQueue=[]; this.spawnT=0;
     this.supplyT=12;
-    this.vipTotal=0; this.vipBucket=-1; this.vipInBucket=0;
+    this.vipTotal=0; this.vipBucket=-1; this.vipInBucket=0; this._vipSlot=-1;
     this.runResearch=0; this.runKills=0;
     this.selected=null; this.placing=null;
     // feature state: abilities, perks, crates, strikes, daily
@@ -1162,13 +1188,17 @@ TD.Game = class {
       if (!inB(cc,rr)) return {ok:false,reason:'bounds'};
       if (isBorder(cc,rr)) return {ok:false,reason:'border'};
       const v=this.cells[idx(cc,rr)];
-      if (v===1||v===2) return {ok:false,reason:'occupied'};
+      if (v===1||v===2){
+        if (kind==='tower'&&v===1&&this.bldgH&&this.bldgH[idx(cc,rr)]) continue; // rooftop slot
+        return {ok:false,reason:'occupied'};
+      }
     }
     const i=idx(c,r);
     if (kind==='tower'){
       if (this.towerMap[i]) return {ok:false,reason:'occupied'};
       if (this.groundMap[i]) return {ok:false,reason:'occupied'};
       if (this.stackH[i]>0) return {ok:true,cost,elev:this.stackH[i]}; // on a block: path unchanged
+      if (this.bldgH&&this.bldgH[i]>0) return {ok:true,cost,elev:this.bldgH[i]}; // rooftop: path unchanged
       return this.checkPathThenOk([ [c,r] ],cost);
     }
     // blocks
@@ -1213,7 +1243,7 @@ TD.Game = class {
     if (kind==='tower'){
       const t=new Tower(this,id,c,r,chk.elev||0);
       this.towers.push(t); this.towerMap[i]=t;
-      if (!this.stackH[i]) this.cells[i]=3;
+      if (!this.stackH[i]&&!(this.bldgH&&this.bldgH[i])) this.cells[i]=3;
       this.eng.applyCosmetics(t.model,id,t.tiers);
       this.eng.dropIn(t.model);
     } else {
@@ -1313,7 +1343,7 @@ TD.Game = class {
       this.eng.scene.remove(obj.model);
       this.towers=this.towers.filter(x=>x!==obj);
       delete this.towerMap[i];
-      if (!this.stackH[i]) this.cells[i]=0;
+      if (!this.stackH[i]&&!(this.bldgH&&this.bldgH[i])) this.cells[i]=0;
     }
     this.gold+=refund;
     this.rebuildField(); this.recomputeStats();
@@ -1417,7 +1447,7 @@ TD.Game = class {
       px=(pa.x+pb.x)/2; pz=(pa.z+pb.z)/2;
     } else { const p=this.eng.cellToWorld(c.c,c.r); px=p.x; pz=p.z; }
     const i=idx(c.c,c.r);
-    if (kind==='tower') py=this.stackH[i]*1.51;
+    if (kind==='tower') py=(this.stackH[i]||(this.bldgH&&this.bldgH[i])||0)*1.51;
     if (kind==='block'&&def.id==='block') py=this.stackH[i]*1.51;
     this.ghost.position.set(px,py,pz);
     this._ghostCell=c;
@@ -1427,7 +1457,10 @@ TD.Game = class {
     for (const [cc,rr] of chkCells){
       if(!inB(cc,rr)||isBorder(cc,rr)){ ok=false; break; }
       const ii=idx(cc,rr), v=this.cells[ii];
-      if (v===1||v===2){ ok=false; break; }
+      if (v===1||v===2){
+        if (kind==='tower'&&v===1&&this.bldgH&&this.bldgH[ii]) continue; // rooftop slot
+        ok=false; break;
+      }
       if (kind==='tower'&&(this.towerMap[ii]||this.groundMap[ii])) ok=false;
       if (kind==='block'&&def.id==='block'&&(this.towerMap[ii]||this.groundMap[ii]||this.stackH[ii]>=C.MAX_STACK)) ok=false;
       if (kind==='block'&&def.id!=='block'&&(v!==0||this.towerMap[ii]||this.groundMap[ii]||this.stackH[ii]>0)) ok=false;
@@ -1510,12 +1543,16 @@ TD.Game = class {
     }
     this.wave++;
     this.spawnQueue=this.composeWave(this.wave);
-    if (!this.showcase&&this.wave>=3&&Math.random()<0.35){
+    if (!this.showcase&&this.wave>=10){
       const bucket=Math.floor(this.wave/10);
       if (this.vipBucket!==bucket){ this.vipBucket=bucket; this.vipInBucket=0; }
-      if (this.vipTotal<5&&this.vipInBucket<2){
-        this.spawnQueue.push({type:'vip',angle:Math.random()*Math.PI*2,t:0.8+Math.random()*4});
-        this.vipTotal++; this.vipInBucket++;
+      const slot=this.wave%10;
+      if (this.vipTotal<5&&this.vipInBucket<2&&(slot===0||slot===5)){
+        const key=bucket*10+slot;
+        if (this._vipSlot!==key){ this._vipSlot=key;
+          this.spawnQueue.push({type:'vip',angle:Math.random()*Math.PI*2,t:0.8+Math.random()*4});
+          this.vipTotal++; this.vipInBucket++;
+        }
       }
     }
     this.spawnT=0; this.waveActive=true;
@@ -1671,15 +1708,16 @@ TD.Game = class {
     this.eng.ring(pos,1.6,0x7dd3fc,0.5);
     this.eng.text(pos.clone().setY(1),'SUPPLY DROP','#7dd3fc',true);
   }
-  collectCrate(crate){
+  collectCrate(crate,mul){
     if (this.netGuest){ TD.Net.send({t:'crate',cid:crate.cid}); return; }
     if (!this.crates.includes(crate)) return;
+    const m=mul||1;
     this.eng.mapGroup.remove(crate.model);
     this.crates=this.crates.filter(c=>c!==crate);
     if (crate.supply){
       const roll=Math.random();
       if (roll<0.5){
-        const gold=Math.round((30+this.wave*3)*this.diff.goldMul);
+        const gold=Math.round((30+this.wave*3)*this.diff.goldMul*m);
         this.gold+=gold;
         this.eng.text(crate.pos,'SUPPLY +$'+gold,'#ffd166',true);
       } else if (roll<0.7){
@@ -1689,14 +1727,14 @@ TD.Game = class {
         this.shield+=150;
         this.eng.text(crate.pos,'+150 SHIELD','#7dd3fc',true);
       } else {
-        this.save.research+=8; this.runResearch+=8;
-        this.eng.text(crate.pos,'+8 RESEARCH','#c084fc',true);
+        this.save.research+=Math.round(8*m); this.runResearch+=Math.round(8*m);
+        this.eng.text(crate.pos,'+'+Math.round(8*m)+' RESEARCH','#c084fc',true);
       }
       this.eng.ring(crate.pos,2.5,0x7dd3fc,0.6);
       this.eng.burst(crate.pos.clone().setY(0.5),0x7dd3fc,12,3,0.5,5);
       TD.Audio.sfx('gold');
     } else {
-      const gold=Math.round((15+this.wave*2)*this.diff.goldMul);
+      const gold=Math.round((15+this.wave*2)*this.diff.goldMul*m);
       this.gold+=gold;
       this.eng.text(crate.pos,'+'+gold,'#ffd166',true);
       TD.Audio.sfx('gold');

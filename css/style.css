@@ -174,11 +174,11 @@ button {
 }
 
 .menu-col {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 12px;
-    margin-top: 44px;
-    width: 280px;
+    margin-top: 40px;
+    width: 540px;
 }
 
 .btn {
@@ -240,15 +240,15 @@ button {
 
 /* ---------- map select ---------- */
 .h2 {
-    font-size: 26px;
+    font-size: 22px;
     font-weight: 800;
     letter-spacing: 3px;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
 }
 
 .h2sub {
     color: var(--dim);
-    margin-bottom: 26px;
+    margin-bottom: 14px;
 }
 
 .map-grid {
@@ -260,14 +260,14 @@ button {
 }
 
 .map-card {
-    width: 190px;
+    width: 158px;
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--r);
-    padding: 14px;
+    padding: 10px;
     display: flex;
     flex-direction: column;
-    gap: 9px;
+    gap: 7px;
     transition: all .15s;
     cursor: pointer;
     box-shadow: var(--shadow);
@@ -366,7 +366,7 @@ button {
 /* ---------- loadout ---------- */
 .loadout-wrap {
     display: flex;
-    gap: 26px;
+    gap: 18px;
     max-width: 1200px;
     width: 94%;
     align-items: flex-start;
@@ -377,8 +377,8 @@ button {
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--r);
-    padding: 16px;
-    max-height: 76vh;
+    padding: 12px;
+    max-height: 62vh;
     overflow-y: auto;
     box-shadow: var(--shadow);
 }
@@ -388,36 +388,36 @@ button {
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--r);
-    padding: 16px;
+    padding: 12px;
     box-shadow: var(--shadow);
     position: sticky;
     top: 0;
 }
 
 .panel-h {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 800;
     letter-spacing: 2px;
     color: var(--dim);
     text-transform: uppercase;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
 }
 
 .roster-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill,minmax(112px,1fr));
-    gap: 10px;
+    grid-template-columns: repeat(auto-fill,minmax(88px,1fr));
+    gap: 8px;
 }
 
 .tcard {
     background: #f4fbff;
     border: 1px solid var(--line);
     border-radius: 10px;
-    padding: 10px 8px;
+    padding: 7px 6px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     cursor: pointer;
     transition: all .12s;
     text-align: center;
@@ -477,9 +477,9 @@ button {
 }
 
 .tportrait {
-    width: 52px;
-    height: 52px;
-    border-radius: 12px;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -578,7 +578,7 @@ button {
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--r);
-    padding: 16px;
+    padding: 12px;
     box-shadow: var(--shadow);
 }
 
@@ -586,8 +586,8 @@ button {
     background: #f4fbff;
     border: 1px solid var(--line);
     border-radius: 10px;
-    padding: 11px 12px;
-    margin-bottom: 10px;
+    padding: 7px 10px;
+    margin-bottom: 6px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -799,7 +799,7 @@ button {
 .corner-tr {
     position: absolute;
     top: 14px;
-    right: 14px;
+    right: 116px;
     display: flex;
     gap: 8px;
 }
@@ -853,10 +853,11 @@ button {
     top: 14px;
     bottom: 14px;
     transform: none;
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(2, 62px);
+    grid-auto-rows: min-content;
     gap: 8px;
-    align-items: flex-end;
+    align-content: start;
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 16px;
@@ -2279,12 +2280,20 @@ kbd {
     position: relative;
     z-index: 1;
     background: linear-gradient(180deg,#ffffff 0%,#ffd34d 55%,#ff9f6e 100%);
-    background-size: 200% 200%;
-    animation: titleSheen 4s ease-in-out infinite;
+    background-size: 100% 100%;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 10px 24px rgba(255,170,50,.4));
+    animation: titleFloat 5s ease-in-out infinite;
 }
-@keyframes titleSheen {
-    0%,100% { background-position: 0% 0%; }
-    50% { background-position: 100% 100%; }
+@keyframes titleFloat {
+    0%,100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+}
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+    .title-big {
+        -webkit-text-fill-color: initial;
+        color: #ffd34d;
+    }
 }
 
 .orb-ring {

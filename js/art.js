@@ -74,6 +74,9 @@ TD.art = (function(){
        '<circle cx="25" cy="16" r="4" fill="#ff5f8a"/>'+
        '<path d="M27 13 l5 -3 M27 19 l5 3 M4 13 l-2 -3 M4 19 l-2 3" stroke="#ff8fb0" stroke-width="1.6" stroke-linecap="round"/>'+
        '<path d="M26 16 l4 0" stroke="#ffd1dd" stroke-width="1.4"/>',
+    vacuum:'<path d="M16 2 l4 5 -8 0 z" fill="#86efac"/>'+
+       '<path d="M12 7 h8 l-1.6 10 a2.6 2.6 0 0 1 -4.8 0 z" fill="#39424d"/>'+
+       '<path d="M14.5 16 l1.5 -4 1.5 4 z" fill="#d8f7ea"/>',
     orbital:'<path d="M16 2 l3.5 7 7 3.5 -7 3.5 -3.5 7 -3.5 -7 -7 -3.5 7 -3.5 z" fill="#ff9f6e"/>'+
        '<circle cx="24" cy="24" r="4" fill="#ff6b6b"/>',
     overclock:'<path d="M17 2 L8 18 h6 l-2 12 11 -16 h-6 z" fill="#ffd34d"/>',

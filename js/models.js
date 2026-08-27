@@ -1229,6 +1229,22 @@ E.makeTower=function(id){
       for(let i=0;i<3;i++){ const ring=this.torus(0.16,0.025,0xff8fb0,{e:1.1},8); ring.position.z=1.1+i*0.06; barrel.add(ring); }
       muzzle=new THREE.Vector3(0,hy+0.32,1.5);
       break; }
+    case 'vacuum': {
+      this._tdsHull(head,0.8,0.55,0.9,K);
+      barrel=new THREE.Group(); barrel.position.set(0,0.3,0); head.add(barrel);
+      const funnel=this.cone(0.5,0.6,0x39424d,{m:0.5},12); funnel.position.y=0.5; barrel.add(funnel);
+      const mouth=this.torus(0.52,0.05,0x86efac,{e:0.7},12); mouth.position.y=0.83; barrel.add(mouth);
+      const spin=new THREE.Group(); spin.position.y=0.34; barrel.add(spin);
+      spin.add(this.box(0.72,0.05,0.12,0x22262b,{m:0.4}));
+      spin.add(this.box(0.12,0.05,0.72,0x22262b,{m:0.4}));
+      spin.userData.tag='spin';
+      const lens=this.sph(0.17,0x86efac,{e:1.8},10); lens.position.y=0.08; barrel.add(lens);
+      lens.userData.tag='lens';
+      const thr=this.cyl(0.2,0.24,0.26,0x39424d,{m:0.5},10); thr.position.y=-0.3; barrel.add(thr);
+      const jet=this.sph(0.1,0x9ff0c8,{e:2},8); jet.position.y=-0.5; barrel.add(jet);
+      jet.userData.tag='jet';
+      muzzle=new THREE.Vector3(0,hy+0.3,1.5);
+      break; }
     case 'scatter': {
       this._tdsHull(head,0.95,0.52,0.8,K);
       barrel=new THREE.Group(); barrel.position.set(0,0.1,0.3); head.add(barrel);

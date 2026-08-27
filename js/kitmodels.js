@@ -26,6 +26,7 @@ TD.loadAssets=function(done,onProg){
     t.magFilter=THREE.NearestFilter; t.minFilter=THREE.NearestFilter;
     palettes[k]=t;
   }
+  palettes.city=gradMap();   // flat-color fallback for building GLBs
   const loader=new THREE.GLTFLoader();
   const keys=Object.keys(TD.ASSETS);
   const total=keys.length;
@@ -38,13 +39,13 @@ TD.loadAssets=function(done,onProg){
     const ok=gltf=>{
       try{
         const scene=gltf.scene;
-        const pal=palettes[TDKEYS.has(k)?'td':'car']||null;
+        const pal=palettes[TDKEYS.has(k)?'td':BLDCITY.has(k)?'city':'car']||null;
         scene.traverse(o=>{
           if (o.isMesh){
             const src=o.material;
             const useMap=src.map||( (src.name==='colormap'&&o.geometry.attributes.uv)? pal : null );
             o.material=new THREE.MeshToonMaterial({ color:src.color?src.color.clone():new THREE.Color(0xffffff),
-              map:useMap, vertexColors:!!(o.geometry&&o.geometry.attributes.color), gradientMap:gradMap() });
+              map:useMap, vertexColors:!!(o.geometry&&o.geometry.attributes.color)&&!useMap, gradientMap:gradMap() });
             o.castShadow=true; o.receiveShadow=true;
           }
         });
@@ -207,11 +208,72 @@ E.updateFX=function(dt){
 };
 
 /* ---------- map dressing: trees / rocks / crystals in the kit style ---------- */
+const BLDCITY=new Set(['bldg1','bldg2','bldg3','bldg4','bldg5','bldg6','bldg7','bldg8','bldg9','bldg10','bldg11']);
+const BLDKEYS=['bldg1','bldg2','bldg3','bldg4','bldg5','bldg6','bldg7','bldg8','bldg9','bldg10','bldg11'];
+/* a building scaled to sit on one cell, up to h cells tall */
+E.makeBuilding=function(h,key){
+  const m=TD.MODELS[key]; if(!m) return null;
+  const g=new THREE.Group();
+  const c=m.scene.clone(true);
+  const sx=Math.max(m.size.x,m.size.z), sy=m.size.y;
+  const s=Math.min(4.5/sx, (h*1.51*5)/sy);   // huge city blocks — 5x scale
+  c.scale.setScalar(s);
+  c.position.y=-m.minY*s;
+  if (!m._flat){
+    m._flat=true;
+    const T=[0x9aa3ad,0x8a93a3,0xaab3bf,0x98a2b0][key.charCodeAt(4)%4];
+    const col=new THREE.Color(T);
+    c.traverse(o=>{ if(o.isMesh&&!o.material.map){
+      o.material=o.material.clone(); o.material.color.copy(col).offsetHSL(0,0,((key.charCodeAt(4)+key.charCodeAt(5))%7-3)*0.04); o.material.vertexColors=false; } });
+  }
+  g.add(c);
+  g.userData.bldgH=h;
+  return g;
+};
 const _buildMap=E.buildMap;
 E.buildMap=function(map){
   const grp=_buildMap.call(this,map);
-  if (!TD.MODELS.tree) return grp;
   const C=TD.CONFIG, G=C.GRID;
+  map._bldgs=map.bldgs||[];
+  // ---- fixed city layout: buildings + parked city traffic ----
+  if (map._bldgs.length){
+    for (const [c,r,h] of map._bldgs){
+      const key=BLDKEYS[(c*7+r*13)%BLDKEYS.length];
+      const m=this.makeBuilding(h,key);
+      if (!m) continue;
+      const p=this.cellToWorld(c,r);
+      m.position.set(p.x,0,p.z);
+      m.rotation.y=((r*3+c)%4)*Math.PI/2;
+      m.userData.owner={isBldg:true,c,r};
+      (map._bldgModels=map._bldgModels||[]).push(m);
+      grp.add(m);
+    }
+    if (map.traffic){
+      let seed=(map.seed*13+5)>>>0;
+      const rnd=()=>{ seed=(seed+0x6D2B79F5)>>>0; let t=Math.imul(seed^(seed>>>15),1|seed);
+        t=(t+Math.imul(t^(t>>>7),61|t))^t; return ((t^(t>>>14))>>>0)/4294967296; };
+      const cars=['sedan','suv','van','race'];
+      const tints=[0xff8a5a,0x5ac8ff,0xffd166,0x86efac,0xd8a7ff];
+      const blocked=new Set(map._bldgs.map(([c,r])=>r*G+c));
+      (map._rocks||[]).forEach(([c,r])=>blocked.add(r*G+c));
+      for (const [c,r] of map._bldgs){
+        if (rnd()<0.35) continue;
+        const dirs=[[1,0],[0,1],[-1,0],[0,-1]];
+        const d=dirs[Math.floor(rnd()*dirs.length)];
+        const cc=c+d[0], rr=r+d[1];
+        if (blocked.has(rr*G+cc)) continue;
+        blocked.add(rr*G+cc);
+        const m=this.asset(cars[Math.floor(rnd()*cars.length)],{len:2.3,tint:tints[Math.floor(rnd()*tints.length)],tintAmt:0.5});
+        if (!m) continue;
+        const p=this.cellToWorld(cc,rr);
+        m.position.set(p.x+(rnd()-0.5)*0.6,0,p.z+(rnd()-0.5)*0.6);
+        m.rotation.y= d[0]? (d[0]>0?0:Math.PI) : (d[1]>0?Math.PI/2:-Math.PI/2);
+        grp.add(m);
+      }
+    }
+  }
+  // ---- nature dressing (never on New Tower City) ----
+  if (!TD.MODELS.tree||map.id===5) return grp;
   let seed=(map.seed*7+3)>>>0;
   const rnd=()=>{ seed=(seed+0x6D2B79F5)>>>0; let t=Math.imul(seed^(seed>>>15),1|seed);
     t=(t+Math.imul(t^(t>>>7),61|t))^t; return ((t^(t>>>14))>>>0)/4294967296; };

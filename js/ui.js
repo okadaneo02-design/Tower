@@ -859,10 +859,18 @@ function buildTitle(){
         if (cheatSeq.length>5) cheatSeq.shift();
         if (cheatSeq.join('')===CHEAT.join('')){
           cheatSeq=[];
-          game.gold+=9999999;
-          TD.Audio.sfx('gold');
-          toast('CHEAT CODE — +9,999,999 gold!');
-          updateHUD();
+          const inGame=game.state==='playing'||game.state==='prep';
+          if (inGame){
+            game.gold+=9999999;
+            TD.Audio.sfx('gold');
+            toast('CHEAT CODE — +9,999,999 gold!');
+            updateHUD();
+          } else {
+            game.save.allMapsUnlocked=true;
+            TD.Audio.sfx('gold');
+            toast('CHEAT CODE — ALL MAPS UNLOCKED!');
+            if (screens.mapselect) paintMapSelect();
+          }
         }
         return;
       }
