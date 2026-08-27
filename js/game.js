@@ -54,6 +54,15 @@ function applyMod(s,m){
       case 'shieldAdd': s.shield+=v; break;
       case 'spreadOnDeath': s.spreadOnDeath=true; break;
       case 'coneAdd': s.cone+=v; break;
+      case 'aaDmgAdd': s.aaDmg+=v; break;
+      case 'aaRofMul': s.aaRof*=v; break;
+      case 'planeAdd': s.planeN+=v; break;
+      case 'planeSpdMul': s.planeSpd*=v; break;
+      case 'planeDmgAdd': s.planeDmg+=v; break;
+      case 'bombDmgAdd': s.bombDmg+=v; break;
+      case 'heliRangeAdd': s.heliRange+=v; break;
+      case 'chargeSub': s.chargeT=Math.max(0.12,(s.chargeT||0.6)-v); break;
+      case 'ability': s.ability=v; break;
     }
   }
 }
@@ -79,6 +88,10 @@ class Tower {
     game.eng.scene.add(this.model);
     this.pos=p; this.aimAngle=Math.random()*6.28;
     this.stats=null;
+    this.planes=[]; this.abilityCd=8; this.aaCd=0; this.strikes=0;
+    this.spin=0; this.heat=0;
+    this.animRefs={};
+    this.model.traverse(o=>{ if (o.userData&&o.userData.tag) this.animRefs[o.userData.tag]=o; });
   }
   totalTiers(){ return this.tiers[0]+this.tiers[1]+this.tiers[2]; }
   computeSelf(){
@@ -92,9 +105,13 @@ class Tower {
       buffDmg:d.buffDmg||0, buffRof:0, buffRange:0, buffDetect:false,
       armorPierce:false, critProb:0, critMul:2, stunProb:0, stunDur:0, pierce:0,
       freezeProb:0, freezeDur:0, spreadOnDeath:false, lowBoost:false, baseHpMul:1, shield:0,
+      aaDmg:d.aaDmg||0, aaRof:d.aaRof||0, planeN:d.planeN||0, planeSpd:d.planeSpd||1,
+      planeDmg:d.planeDmg||0, bombDmg:d.bombDmg||0, heliRange:d.heliRange||6, chargeT:d.chargeT||0.6, ability:null,
       targets:d.targets };
     this.tiers.forEach((tier,pi)=>{ for(let k=0;k<tier;k++) applyMod(s, d.paths[pi].tiers[k].mod); });
     s.dmg*=1+g.techDmg; s.range*=1+g.techRange;
+    s.dmg*=C.TOWER_DMG_MUL; s.rof*=C.TOWER_ROF_MUL; s.range*=C.TOWER_RANGE_MUL;
+    if (TD.materialOf&&TD.materialOf(this.id)==='gold'){ s.dmg*=1.30; s.rof*=1.20; s.range*=1.15; }
     s.range+=this.elev*C.ELEV_RANGE_BONUS;   // high ground advantage
     // run perks + veterancy ranks
     if (g.hasPerk&&g.hasPerk('sharp')) s.dmg*=1.10;
@@ -184,8 +201,118 @@ class Tower {
     }
     this.cd=Math.max(this.cd-dt,-0.5);
     if (this.cd<=0 && this.target && this.aligned){
-      this.cd=1/Math.max(0.05,s.rof*(this.game.overclockT>0?1.5:1));
+      const spinK=this.def.id==='minigun'?(0.15+0.85*(this.spin||0)):1;
+      this.cd=1/Math.max(0.05,s.rof*spinK*(this.game.overclockT>0?1.5:1));
       this.fire();
+    }
+    // ---- turret flair animations ----
+    const refs=this.animRefs||{}, g2=this.game;
+    if (this.def.id==='minigun'){
+      const want=this.target?1:0;
+      this.spin=(this.spin||0)+(want-(this.spin||0))*Math.min(1,dt/(want?(s.chargeT||0.6):0.3));
+      if (u.barrel) u.barrel.rotation.z+=this.spin*30*dt;   // rotary barrels spin up
+      if (refs.heat) refs.heat.material.emissiveIntensity=Math.max(this.spin*1.6,(this.heat||0)*1.6);
+    }
+    if (this.heat>0){ this.heat=Math.max(0,(this.heat||0)-dt*0.55);
+      if (refs.heat) refs.heat.material.emissiveIntensity=Math.max(refs.heat.material.emissiveIntensity||0,this.heat*1.6); }
+    if (this.def.arche==='rail'&&refs.coil){
+      const ready=this.target?Math.max(0,Math.min(1,1-this.cd*3)):0;
+      refs.coil.material.emissiveIntensity=0.4+ready*2.2;
+      refs.coil.scale.setScalar(1+ready*0.4);
+      if (this.cd<=0.03&&this.target&&Math.random()<dt*30) g2.eng.burst(this.muzzleWorld(),0xbfe6ff,2,2,0.2,3);
+    }
+    if (this.def.arche==='laser'){
+      if (refs.lens) refs.lens.material.emissiveIntensity=(this.cd<0.2?2.0:0.5)+Math.random()*0.4;
+    }
+    if (this.def.arche==='sniper'){
+      if (refs.scope) refs.scope.material.emissiveIntensity=0.8+Math.sin(g2.eng.time*4)*0.5;
+      if (this.target&&this.aligned&&Math.random()<dt*6) g2.eng.beam(this.muzzleWorld(),this.target.center(),0xd0e2ff,0.02);
+    }
+    if (this.def.arche==='frost'&&Math.random()<dt*5&&this.target)
+      g2.eng.lightning(this.pos.clone().setY(2.1),this.target.pos.clone().setY(0.8),0x9fd8ff);
+    if (this.def.arche==='flame'){
+      if (refs.nozzle) refs.nozzle.material.emissiveIntensity=(this.target&&this.cd<0.25?1.6:0.25)+Math.random()*0.5;
+      // continuous stream of big squares while it's spraying (fills the gaps between shots)
+      if (this.target&&this.cd<0.35){
+        const fdir=new THREE.Vector3(Math.sin(this.aimAngle),0.05,Math.cos(this.aimAngle));
+        if (Math.random()<dt*30){
+          const d=Math.random()*this.rangeW()*0.95;
+          const fp=this.muzzleWorld().clone().addScaledVector(fdir,d)
+            .add(new THREE.Vector3((Math.random()-0.5)*0.5,Math.random()*0.4,(Math.random()-0.5)*0.5));
+          g2.eng.sqBurst(fp,[0xff6b3d,0xffc46b,0xffd166][Math.floor(Math.random()*3)],2,2.4,0.3,0.5);
+        }
+      }
+    }
+    if (s.ability){
+      this.abilityCd-=dt;
+      if (this.abilityCd<=0 && this.target) this.castAbility();
+    }
+  }
+  castAbility(){
+    const g=this.game, s=this.stats;
+    this.abilityCd=(this.def.abilityCd||40);
+    switch(s.ability){
+      case 'inferno': {
+        const R=6*C.CELL;
+        g.eng.ring(this.pos,R,0xff8a3d,0.8);
+        g.eng.shakeCam(0.7);
+        for (const e of g.enemies){
+          if (e.dead) continue;
+          const dx=e.pos.x-this.pos.x,dz=e.pos.z-this.pos.z;
+          if (dx*dx+dz*dz<R*R){ e.applyBurn(60,5); g.hitEnemy(e,80,{tower:this}); }
+        }
+        for(let i=0;i<14;i++){
+          const a=Math.random()*Math.PI*2, r=Math.random()*R;
+          g.eng.burst(new THREE.Vector3(this.pos.x+Math.cos(a)*r,1,this.pos.z+Math.sin(a)*r),0xff8a3d,6,3,0.5,4);
+        }
+        TD.Audio.sfx('flame');
+        break; }
+      case 'rain': {
+        const R=this.rangeW()*1.6;
+        for (let i=0;i<70;i++){
+          const a=Math.random()*Math.PI*2, r=Math.random()*R;
+          const to=new THREE.Vector3(this.pos.x+Math.cos(a)*r,0.1,this.pos.z+Math.sin(a)*r);
+          const from=new THREE.Vector3(to.x,22,to.z);
+          g.projectiles.push({ kind:'arc', from, to, t:-Math.random()*0.6, dur:0.7, splash:0.35, dmg:8, opts:{tower:this}, stun:0, stunDur:0, mesh:g.getShellMesh(0xffc46b,0.08) });
+        }
+        g.eng.burst(this.pos.clone().setY(12),0xffc46b,30,6,0.5,6);
+        g.eng.shakeCam(0.6);
+        TD.Audio.sfx('shotgun');
+        break; }
+      case 'seismic': {
+        const R=5*C.CELL;
+        g.eng.ring(this.pos,R,0xff9d5c,0.8);
+        g.eng.shakeCam(0.9);
+        for (const e of g.enemies){
+          if (e.dead) continue;
+          const dx=e.pos.x-this.pos.x,dz=e.pos.z-this.pos.z;
+          if (dx*dx+dz*dz<R*R) e.applyStun(1.5);
+        }
+        TD.Audio.sfx('explode');
+        break; }
+      case 'emp': {
+        const R=6*C.CELL;
+        g.eng.ring(this.pos,R,0x9fe8ff,0.7);
+        g.eng.lightning(this.pos.clone().setY(2),this.pos.clone().add(new THREE.Vector3(R*0.7,0,0)),0x9fd8ff);
+        g.eng.shakeCam(0.6);
+        for (const e of g.enemies){
+          if (e.dead) continue;
+          const dx=e.pos.x-this.pos.x,dz=e.pos.z-this.pos.z;
+          if (dx*dx+dz*dz<R*R) e.applyStun(2);
+        }
+        TD.Audio.sfx('freezeHit');
+        break; }
+      case 'exec': {
+        let best=null,bf=Infinity;
+        for (const e of g.enemies){ if(e.dead||!this.canSee(e)) continue; if (e.hp<bf){bf=e.hp;best=e;} }
+        if (best){
+          const mp=this.muzzleWorld();
+          g.eng.beam(mp,best.center(),0xff6b6b,0.12,0.16);
+          g.eng.text(best.center(),'EXECUTED','#ff6b6b',true);
+          g.hitEnemy(best,2000,{armorPierce:true});
+        }
+        TD.Audio.sfx('sniper');
+        break; }
     }
   }
   fire(){
@@ -209,6 +336,7 @@ class Tower {
       case 'gun': {
         eng.beam(mp, e.center(), col, 0.05);
         eng.muzzleFlash(mp);
+        if (this.animRefs&&this.animRefs.heat) this.heat=Math.min(1,(this.heat||0)+(this.def.id==='minigun'?0.09:0.05));
         let dm=s.dmg; if (Math.random()<s.critProb) dm*=s.critMul;
         g.hitEnemy(e,dm,hitOpts);
         break; }
@@ -294,13 +422,38 @@ class Tower {
         break; }
       case 'flame': {
         const targets=g.enemiesInCone(this.pos,this.aimAngle,this.rangeW(),s.cone,this);
-        const dir=new THREE.Vector3(Math.sin(this.aimAngle),0.12,Math.cos(this.aimAngle));
-        for(let i=0;i<3;i++){
-          const p=mp.clone().addScaledVector(dir,0.3+Math.random()*this.rangeW()*0.85);
-          eng.burst(p,[0xff9e5e,0xffc46b,0xff6b3d][i%3],2,1.5,0.3,-1);
+        const dir=new THREE.Vector3(Math.sin(this.aimAngle),0.05,Math.cos(this.aimAngle));
+        const cols=[0xff6b3d,0xffc46b,0xffd166,0xef4444];
+        // big square flame particles stream out to the end of range
+        for(let i=0;i<40;i++){
+          const d=(0.05+Math.random()*0.95)*this.rangeW();
+          const p=mp.clone().addScaledVector(dir,d)
+            .add(new THREE.Vector3((Math.random()-0.5)*0.6,Math.random()*0.5,(Math.random()-0.5)*0.6));
+          eng.sqBurst(p,cols[i%4],1,2.6,0.28+Math.random()*0.14,0.5);
         }
+        for(let i=0;i<5;i++){ const d=(0.2+Math.random()*0.8)*this.rangeW();
+          eng.burst(mp.clone().addScaledVector(dir,d),cols[i%4],2,1.5,0.3,-1); }
         for(const t of targets){ g.hitEnemy(t,s.dmg,hitOpts); if(s.burnDps) t.applyBurn(s.burnDps,s.burnDur); }
+        // AOE: anything close to a torched vehicle catches fire too
+        if (s.burnDps) for (const t of targets){
+          for (const o of g.enemies){
+            if (o.dead||o===t) continue;
+            const dx=o.pos.x-t.pos.x,dz=o.pos.z-t.pos.z;
+            if (dx*dx+dz*dz<Math.pow(1.15*C.CELL,2)) o.applyBurn(s.burnDps,s.burnDur);
+          }
+        }
         if (targets.length) TD.Audio.sfx('flame');
+        break; }
+      case 'laser': {
+        const end=e.center();
+        eng.beam(mp,end,0xff4d7d,0.08,0.12);
+        eng.muzzleFlash(mp,0xff8fb0,1.2);
+        g.hitEnemy(e,s.dmg,hitOpts);
+        // heat splash around the impact point
+        for (const t of g.enemiesInRange(e.pos,0.9*C.CELL,this)){
+          if (t===e) continue;
+          g.hitEnemy(t,s.dmg*0.5,hitOpts);
+        }
         break; }
       case 'rail': {
         const dir=new THREE.Vector3().subVectors(e.center(),mp); dir.y=0; dir.normalize();
@@ -358,11 +511,11 @@ class Enemy {
     this.affix=affix||null;
     const af=this.affix? TD.AFFIXES[this.affix] : null;
     const daily=game.daily;
-    const hpScale=TD.scaleHp(wave)*diff.hpMul*(this.def.boss? 1+(Math.floor(wave/10)-1)*1.2 : 1);
+    const hpScale=TD.scaleHp(wave)*diff.hpMul*C.ENEMY_HP_MUL*(this.def.boss? 1+(Math.floor(wave/10)-1)*1.2 : 1);
     this.maxHp=Math.round(this.def.hp*hpScale*(af?af.hpMul:1)*(daily&&daily.mod.id==='brittle'?0.8:1));
     this.hp=this.maxHp;
     this.armor=(this.def.armor||0)+((af&&af.armorAdd)||0);
-    this.speed=this.def.spd*diff.spdMul*((af&&af.spdMul)||1)*(daily&&daily.mod.id==='fast'?1.15:1)*C.CELL;
+    this.speed=this.def.spd*diff.spdMul*C.ENEMY_SPD_MUL*((af&&af.spdMul)||1)*(daily&&daily.mod.id==='fast'?1.15:1)*C.CELL;
     this.exposedT=0; this.escorts=null; this.shieldDome=null;
     this.stealth=!!this.def.stealth; this.detected=false;
     this.dead=false; this.absorbing=false; this.falling=false;
@@ -378,6 +531,7 @@ class Enemy {
     game.eng.scene.add(this.model);
     if (this.stealth) game.eng.setStealth(this.model,true);
     if (af) game.eng.eliteRing(this.model,af.color);
+    if (this.def.vip) game.eng.eliteRing(this.model,0xffd166);
     this._wasHidden=true;
     const bar=new THREE.Mesh(new THREE.BoxGeometry(1.2,0.1,0.02),
       new THREE.MeshBasicMaterial({color:0x4ade80}));
@@ -435,6 +589,13 @@ class Enemy {
     }
     // dots
     if (this.burn){ this.burn.t-=dt; g.dotDamage(this,this.burn.dps*dt,0xff8c42); if(this.burn&&this.burn.t<=0) this.burn=null; }
+    if (this.burn){
+      if (Math.random()<dt*16){
+        const bx=this.pos.x+(Math.random()-0.5)*0.7, bz=this.pos.z+(Math.random()-0.5)*0.7;
+        g.eng.sqBurst(new THREE.Vector3(bx,0.3*this.def.size+Math.random()*0.7,bz),
+          [0xff6b3d,0xffc46b,0xffd166][Math.floor(Math.random()*3)],1,1.4,0.2,0.6);
+      }
+    }
     if (this.poisons.length){ let total=0;
       for(let i=this.poisons.length-1;i>=0;i--){ const p=this.poisons[i]; p.t-=dt; total+=p.dps; if(p.t<=0) this.poisons.splice(i,1); }
       g.dotDamage(this,total*dt,0xa3e635);
@@ -464,7 +625,7 @@ class Enemy {
         if (Math.random()<dt*8) g.eng.burst(this.center(),0xff4040,2,2,0.3,2); }
       if (this.escorts&&this.shieldDome&&this.shieldDome.visible&&!this.escorts.some(x=>!x.dead)){
         this.shieldDome.visible=false;
-        if (TD.ui) TD.ui.toast('⚡ Boss shield DOWN!');
+        if (TD.ui) TD.ui.toast('Boss shield DOWN!');
         TD.Audio.sfx('research');
         g.eng.ring(this.pos,5,0x7dd3fc,0.6);
       }
@@ -577,6 +738,18 @@ class Enemy {
         g.eng.animEnemy(this.model,dt,1-this.slow);
       }
     }
+    // burning spreads: a lit vehicle torches anyone it touches
+    if (this.burn&&!this.dead){
+      this.spreadT=(this.spreadT||0)-dt;
+      if (this.spreadT<=0){
+        this.spreadT=0.6;
+        for (const o of g.enemies){
+          if (o.dead||o===this||o.burrowed||o.burn) continue;
+          const dx=o.pos.x-this.pos.x,dz=o.pos.z-this.pos.z;
+          if (dx*dx+dz*dz<Math.pow(0.85*C.CELL,2)) o.applyBurn(this.burn.dps*0.6,1.8);
+        }
+      }
+    }
     this.updateBar();
   }
   evalBreach(){
@@ -657,8 +830,14 @@ TD.Game = class {
   loadSave(){
     let s={};
     try{ s=JSON.parse(localStorage.getItem(C.SAVE_KEY))||{}; }catch(e){}
-    this.save=Object.assign({ research:0, tech:[], maps:{}, codes:[], settings:{sfx:0.7,mus:0.45,musicOn:true,dmgNums:true} }, s);
+    this.save=Object.assign({ research:0, tech:[], maps:{}, codes:[], skins:{scrap:[],metal:[],gold:[]}, settings:{sfx:0.7,mus:0.45,musicOn:false,dmgNums:true} }, s);
     if (!this.save.codes) this.save.codes=[];
+    if (!this.save.skins) this.save.skins={scrap:[],metal:[],gold:[]};
+    if (!this.save.settings) this.save.settings={sfx:0.7,mus:0.45,musicOn:false,dmgNums:true};
+    if (this.save.settings.musicInit===undefined){
+      this.save.settings.musicOn=false;   // one-time migration to the new default: music OFF
+      this.save.settings.musicInit=true;
+    }
     for (const m of TD.MAPS) this.save.maps[m.id]=Object.assign({ stars:[], bestWave:0, endlessBest:0 }, this.save.maps[m.id]||{});
     this.applyTech();
   }
@@ -667,6 +846,7 @@ TD.Game = class {
   applyTech(){
     this.techDmg=0; this.techRange=0; this.techBaseHp=0; this.techRegen=0;
     this.techStartGold=0; this.techWaveBonus=0; this.techResWave=0; this.sellRefund=C.SELL_REFUND;
+    this.techSlots=C.SLOT_POINTS;
     for (const br of TD.TECH) for (const n of br.nodes){
       if (!this.techHas(n.id)) continue;
       if (n.dmg) this.techDmg+=n.dmg;
@@ -677,6 +857,7 @@ TD.Game = class {
       if (n.waveBonus) this.techWaveBonus+=n.waveBonus;
       if (n.resWave) this.techResWave+=n.resWave;
       if (n.sell) this.sellRefund=n.sell;
+      if (n.slots) this.techSlots+=n.slots;
     }
   }
   techBuy(node){
@@ -701,6 +882,39 @@ TD.Game = class {
     return Math.round(c);
   }
   rankOf(k){ return k>=150?4:k>=75?3:k>=30?2:k>=10?1:0; }
+  prestige(t){
+    if (this.netGuest||!t||t.isBlock||t.totalTiers()<7) return false;
+    const gain=100+Math.round(t.spent*0.05);
+    t.tiers=[0,0,0]; t.spent=t.def.cost; t.kills=0;
+    this.save.research+=gain; this.runResearch+=gain;
+    this.recomputeStats();
+    this.eng.applyCosmetics(t.model,t.id,t.tiers);
+    this.persist();
+    TD.Audio.sfx('research');
+    if (TD.ui) TD.ui.toast('PRESTIGE — +'+gain+' research!');
+    return true;
+  }
+  materialRank(id){
+    const sk=this.save.skins;
+    if (sk.gold.includes(id)) return 3;
+    if (sk.metal.includes(id)) return 2;
+    if (sk.scrap.includes(id)) return 1;
+    return 0;
+  }
+  buyMaterial(tier){
+    const cost={scrap:30,metal:60,gold:100}[tier];
+    const rank={scrap:1,metal:2,gold:3}[tier];
+    if (this.save.research<cost) return {ok:false,msg:'Need '+cost+' research'};
+    const cands=Object.keys(TD.TOWERS).filter(id=>this.materialRank(id)<rank);
+    if (!cands.length) return {ok:false,msg:'Every turret is already '+tier+' or better'};
+    this.save.research-=cost;
+    const id=cands[Math.floor(this.rand()*cands.length)];
+    for (const k of ['scrap','metal','gold']) this.save.skins[k]=this.save.skins[k].filter(x=>x!==id);
+    this.save.skins[tier].push(id);
+    this.persist();
+    TD.Audio.sfx('research');
+    return {ok:true,id,name:TD.TOWERS[id].name,tier};
+  }
   /* ----- redeem codes (settings) ----- */
   codeGoldBonus(){
     let g=0;
@@ -714,6 +928,7 @@ TD.Game = class {
     if (this.save.codes.includes(code)) return {ok:false,msg:'Code already redeemed'};
     if (code==='BobitaInHopperCity'){
       this.save.codes.push(code); this.save.research+=9999; this.persist();
+      try{ localStorage.setItem('td.admin','1'); }catch(e){} // marks this device as admin
       TD.Audio.sfx('research');
       return {ok:true,msg:'Code redeemed! +9999 research, +2000 starting gold'};
     }
@@ -739,11 +954,13 @@ TD.Game = class {
     this.towerMap={}; this.groundMap={}; this.cellStack={};
     for (const [c,r] of this.map._rocks) this.cells[idx(c,r)]=1;
     this.towers=[]; this.enemies=[]; this.projectiles=[]; this.blocks=[];
-    this.gold=this.diff.startGold+this.techStartGold+this.codeGoldBonus();
+    this.gold=Math.round((this.diff.startGold+this.techStartGold+this.codeGoldBonus())*C.START_GOLD_MUL);
     this.baseMaxHp=Math.round(this.diff.baseHp*(1+this.techBaseHp));
     this.baseHp=this.baseMaxHp;
     this.shieldMax=0; this.shield=0; this.shieldT=0;
     this.wave=0; this.waveActive=false; this.spawnQueue=[]; this.spawnT=0;
+    this.supplyT=12;
+    this.vipTotal=0; this.vipBucket=-1; this.vipInBucket=0;
     this.runResearch=0; this.runKills=0;
     this.selected=null; this.placing=null;
     // feature state: abilities, perks, crates, strikes, daily
@@ -761,7 +978,9 @@ TD.Game = class {
   }
   baseSpotOk(c,r){
     if (c<4||r<4||c>G-6||r>G-6) return false;
-    for(let rr=r;rr<r+2;rr++) for(let cc=c;cc<c+2;cc++) if(this.cells[idx(cc,rr)]!==0) return false;
+    for(let rr=r;rr<r+2;rr++) for(let cc=c;cc<c+2;cc++){
+      if (this.cells[idx(cc,rr)]!==0) return false;
+    }
     return true;
   }
   placeBase(c,r){
@@ -793,6 +1012,7 @@ TD.Game = class {
     this.eng.focus(this.basePos.x,this.basePos.z);
     TD.Audio.sfx('place');
     this.eng.ring(this.basePos,4,0x4ade80,0.6);
+    if (this.eng.baseAura) this.eng.baseAura(this.basePos);
     if (TD.ui){ TD.ui.banner('DEFENSE READY','build your maze, then start the wave'); TD.ui.refreshTowerPanel(); }
     if (TD.Net&&TD.Net.connected&&TD.Net.role==='host') this.netMeta();
     return true;
@@ -800,7 +1020,10 @@ TD.Game = class {
   // scorched-earth cleanup — kills every ghost bullet/missile/enemy between runs
   cleanupRun(){
     for (const e of this.enemies||[]) this.eng.scene.remove(e.model);
-    for (const t of this.towers||[]) this.eng.scene.remove(t.model);
+    for (const t of this.towers||[]){
+      if (t.planes) for (const p of t.planes) this.eng.scene.remove(p.mesh);
+      this.eng.scene.remove(t.model);
+    }
     for (const p of this.projectiles||[]){
       if (p.mesh) p.kind==='missileP'? this.eng.freeMissileMesh(p.mesh) : this.freeShell(p.mesh);
     }
@@ -1025,7 +1248,7 @@ TD.Game = class {
   }
   placeError(r){
     return { occupied:'Space occupied', gold:'Not enough gold', tower:'A turret is up there',
-      enemy:'A vehicle is in the way', seal:"Can't fully seal the base!", stack:'Max stack height (2)',
+      enemy:'A vehicle is in the way', seal:"Can't fully seal the base!", stack:'Max stack height ('+C.MAX_STACK+')',
       border:'Too close to the edge', bounds:'Out of bounds',
       limit:'Block limit reached ('+C.BLOCK_LIMIT+') — sell some first' }[r]||'Can’t build there';
   }
@@ -1086,6 +1309,7 @@ TD.Game = class {
       this.blocks=this.blocks.filter(x=>x!==obj);
     } else {
       const i=idx(obj.c,obj.r);
+      if (obj.planes) for (const p of obj.planes) this.eng.scene.remove(p.mesh);
       this.eng.scene.remove(obj.model);
       this.towers=this.towers.filter(x=>x!==obj);
       delete this.towerMap[i];
@@ -1101,10 +1325,10 @@ TD.Game = class {
   /* ----- upgrades ----- */
   canUpgrade(t,p){
     const nt=t.tiers[p]+1;
-    if (nt>3) return {ok:false,why:'max'};
-    const invested=t.tiers.map((v,i)=>v>0?i:-1).filter(i=>i>=0);
-    if (t.tiers[p]===0&&invested.length>=2) return {ok:false,why:'locked'};
-    if (nt>=2&&t.tiers.some((v,i)=>i!==p&&v>=2)) return {ok:false,why:'capped'};
+    if (nt>5) return {ok:false,why:'max'};
+    if (nt>2 && t.tiers.some((v,i)=>i!==p&&v>2)) return {ok:false,why:'capped'};
+    const total=t.tiers.reduce((a,b)=>a+b,0)+1;
+    if (total>7) return {ok:false,why:'total'};
     const up=t.def.paths[p].tiers[nt-1];
     if (this.gold<up.cost) return {ok:false,why:'gold',cost:up.cost,up};
     return {ok:true,cost:up.cost,up};
@@ -1263,8 +1487,10 @@ TD.Game = class {
       } else { q.push({type,t,angle:baseAngle}); t+=Math.max(0.25,0.9-w*0.012); budget-=cst; }
     }
     if (isBoss){
-      q.push({type:'boss',t:t+1.5,angle:this.rand()*Math.PI*2});
-      if (w>=30) q.push({type:'boss',t:t+4,angle:this.rand()*Math.PI*2});
+      const hard=this.diffId==='hard';
+      const b = w>=30 ? (hard?'bossH':'boss3') : (w>=20?'boss2':'boss');
+      q.push({type:b,t:t+1.5,angle:this.rand()*Math.PI*2});
+      if (w>=30) q.push({type: hard?'boss3':'boss2', t:t+4,angle:this.rand()*Math.PI*2});
     }
     return q;
   }
@@ -1280,16 +1506,20 @@ TD.Game = class {
       const q=this.composeWave(this.wave).map(sp=>({...sp,t:sp.t+this.spawnT+0.5}));
       this.spawnQueue=this.spawnQueue.concat(q).sort((a,b)=>a.t-b.t);
       TD.Audio.sfx('waveStart');
-      if (TD.ui) TD.ui.banner('WAVE '+this.wave+' CALLED EARLY','+'+bonus+' gold');
-      netBn('WAVE '+this.wave+' CALLED EARLY','+'+bonus+' gold');
       return;
     }
     this.wave++;
     this.spawnQueue=this.composeWave(this.wave);
+    if (!this.showcase&&this.wave>=3&&Math.random()<0.35){
+      const bucket=Math.floor(this.wave/10);
+      if (this.vipBucket!==bucket){ this.vipBucket=bucket; this.vipInBucket=0; }
+      if (this.vipTotal<5&&this.vipInBucket<2){
+        this.spawnQueue.push({type:'vip',angle:Math.random()*Math.PI*2,t:0.8+Math.random()*4});
+        this.vipTotal++; this.vipInBucket++;
+      }
+    }
     this.spawnT=0; this.waveActive=true;
     TD.Audio.sfx('waveStart');
-    if (TD.ui) TD.ui.banner('WAVE '+this.wave, this.wave%10===0?'⚠ JUGGERNAUT INCOMING ⚠':'');
-    netBn('WAVE '+this.wave, this.wave%10===0?'⚠ JUGGERNAUT INCOMING ⚠':'');
   }
   spawnEnemyAt(type,pos,wave){
     const e=new Enemy(this,type,0,wave);
@@ -1318,10 +1548,32 @@ TD.Game = class {
     if (this.endless) m.endlessBest=Math.max(m.endlessBest,this.wave);
     this.persist();
     TD.Audio.sfx('waveClear');
-    if (TD.ui) TD.ui.banner('WAVE '+this.wave+' CLEAR','+'+bonus+' gold   +'+res+' research');
+    if (!this.showcase) this.celebrate();
+    if (this.wave%5===0) this.supplyDrop();   // supply crate every 5 cleared waves
+    if (!this.showcase&&this.wave%10===0){
+      const mGold=Math.round(250*this.diff.goldMul);
+      this.gold+=mGold;
+      this.supplyDrop(); this.supplyDrop(); this.supplyDrop();
+      if (TD.ui){ TD.ui.banner('MILESTONE WAVE '+this.wave,'+$'+mGold+' · supply crates!'); TD.ui.toast('MILESTONE — bonus gold + supply drops!'); }
+      TD.Audio.sfx('win');
+    }
     if (!this.endless&&this.wave>=C.CAMPAIGN_WAVES){ this.finish(true); return; }
     // roguelite perk choice every 5 waves
     if (!this.showcase&&this.wave>0&&this.wave%5===0) this.offerPerks();
+  }
+  celebrate(){
+    const R=this.eng.worldSize/2-4;
+    const cols=[0xffd166,0xff6b9d,0x7dd3fc,0xa3e635,0xf472b6,0x38bdf8];
+    const words=['WOOHOO!','NICE!','CLEARED!','ROCK ON!','BEAUTIFUL!'];
+    for (let i=0;i<14;i++){
+      const a=Math.random()*Math.PI*2, r=Math.random()*R;
+      const p=new THREE.Vector3(Math.cos(a)*r,0,Math.sin(a)*r);
+      const col=cols[i%cols.length];
+      this.eng.ring(p,1+Math.random()*1.5,col,0.6);
+      this.eng.burst(p.clone().setY(0.5),col,9,4,0.6,5);
+      if (i%2===0) this.eng.text(p.clone().setY(1.4),words[(i/2)%words.length],'#'+new THREE.Color(col).getHexString(),true);
+    }
+    this.eng.shakeCam(0.35);
   }
   offerPerks(){
     const pool=TD.PERKS.filter(p=>!this.perks.includes(p.id));
@@ -1349,7 +1601,7 @@ TD.Game = class {
       this.aiming=ab;
       if (!this.reticle) this.reticle=this.eng.makeReticle(3*C.CELL);
       this.reticle.visible=true;
-      if (TD.ui) TD.ui.toast('☄ Click anywhere to call the strike — ESC to cancel');
+      if (TD.ui) TD.ui.toast('Click anywhere to call the strike — ESC to cancel');
       TD.Audio.sfx('ui');
       return;
     }
@@ -1394,29 +1646,87 @@ TD.Game = class {
     }
   }
   /* ----- scrap crates (10s to grab) ----- */
-  dropCrate(pos){
+  dropCrate(pos,vip){
     const model=this.eng.makeCrate();
+    if (vip){
+      model.scale.setScalar(2);
+      if (this.eng.goldCrateGlow) this.eng.goldCrateGlow(model);
+    }
     model.position.set(pos.x,0,pos.z);
     this.eng.mapGroup.add(model);
-    const crate={ isCrate:true, model, ttl:10, pos:pos.clone() };
+    const crate={ isCrate:true, model, ttl:vip?15:10, pos:pos.clone() };
     model.userData.owner=crate;
     this.crates.push(crate);
+  }
+  supplyDrop(){
+    if (this.netGuest||this.crates.length>=3) return;
+    const R=this.eng.worldSize/2-4;
+    const pos=new THREE.Vector3((Math.random()-0.5)*R*2,0,(Math.random()-0.5)*R*2);
+    const model=this.eng.makeCrate();
+    model.position.set(pos.x,9,pos.z);
+    this.eng.mapGroup.add(model);
+    const crate={ isCrate:true, model, ttl:12, pos:pos.clone(), supply:true, fall:true };
+    model.userData.owner=crate;
+    this.crates.push(crate);
+    this.eng.ring(pos,1.6,0x7dd3fc,0.5);
+    this.eng.text(pos.clone().setY(1),'SUPPLY DROP','#7dd3fc',true);
   }
   collectCrate(crate){
     if (this.netGuest){ TD.Net.send({t:'crate',cid:crate.cid}); return; }
     if (!this.crates.includes(crate)) return;
-    const gold=Math.round((15+this.wave*2)*this.diff.goldMul);
-    this.gold+=gold;
-    this.eng.text(crate.pos,'+'+gold,'#ffd166',true);
-    TD.Audio.sfx('gold');
-    this.eng.burst(crate.pos.clone().setY(0.5),0xffd166,10,3,0.4,4);
     this.eng.mapGroup.remove(crate.model);
     this.crates=this.crates.filter(c=>c!==crate);
+    if (crate.supply){
+      const roll=Math.random();
+      if (roll<0.5){
+        const gold=Math.round((30+this.wave*3)*this.diff.goldMul);
+        this.gold+=gold;
+        this.eng.text(crate.pos,'SUPPLY +$'+gold,'#ffd166',true);
+      } else if (roll<0.7){
+        this.overclockT=Math.max(this.overclockT,8);
+        this.eng.text(crate.pos,'OVERCLOCK!','#ffd166',true);
+      } else if (roll<0.85){
+        this.shield+=150;
+        this.eng.text(crate.pos,'+150 SHIELD','#7dd3fc',true);
+      } else {
+        this.save.research+=8; this.runResearch+=8;
+        this.eng.text(crate.pos,'+8 RESEARCH','#c084fc',true);
+      }
+      this.eng.ring(crate.pos,2.5,0x7dd3fc,0.6);
+      this.eng.burst(crate.pos.clone().setY(0.5),0x7dd3fc,12,3,0.5,5);
+      TD.Audio.sfx('gold');
+    } else {
+      const gold=Math.round((15+this.wave*2)*this.diff.goldMul);
+      this.gold+=gold;
+      this.eng.text(crate.pos,'+'+gold,'#ffd166',true);
+      TD.Audio.sfx('gold');
+      this.eng.burst(crate.pos.clone().setY(0.5),0xffd166,10,3,0.4,4);
+    }
     if (TD.ui) TD.ui.updateHUD();
   }
   updateCrates(dt){
     for (let i=this.crates.length-1;i>=0;i--){
       const c=this.crates[i]; c.ttl-=dt;
+      if (c.fall){
+        c.model.position.y-=dt*7;
+        if (c.model.position.y<=0){
+          c.model.position.y=0; c.fall=false;
+          this.eng.burst(c.pos.clone().setY(0.5),0x7dd3fc,8,3,0.4,4);
+          TD.Audio.sfx('place');
+        }
+        continue;
+      }
+      // auto-collect magnet: crates drift to the nearest tower/base and get picked up
+      let best=null,bd=Math.pow(4*C.CELL,2);
+      if (this.basePos){ const dx=this.basePos.x-c.pos.x,dz=this.basePos.z-c.pos.z,d2=dx*dx+dz*dz; if(d2<bd){bd=d2;best=this.basePos;} }
+      for (const t of this.towers){ const dx=t.pos.x-c.pos.x,dz=t.pos.z-c.pos.z,d2=dx*dx+dz*dz; if(d2<bd){bd=d2;best=t.pos;} }
+      if (best){
+        const dx=best.x-c.pos.x,dz=best.z-c.pos.z,d=Math.hypot(dx,dz);
+        if (d<1.3*C.CELL){ this.collectCrate(c); continue; }
+        const pull=Math.min(1,(4*C.CELL-d)/2);
+        c.pos.x+=dx/d*dt*6*pull; c.pos.z+=dz/d*dt*6*pull;
+        c.model.position.x=c.pos.x; c.model.position.z=c.pos.z;
+      }
       c.model.position.y=0.15+Math.sin(this.eng.time*3+i)*0.08;
       c.model.rotation.y+=dt*1.2;
       if (c.ttl<3) c.model.visible=Math.sin(this.eng.time*10)>-0.4;
@@ -1427,7 +1737,7 @@ TD.Game = class {
   startDaily(){
     const today=new Date().toISOString().slice(0,10);
     if (this.save.daily&&this.save.daily.date===today&&this.save.daily.done){
-      if (TD.ui) TD.ui.toast('📅 Daily done — score '+(this.save.daily.score||0)+'. Come back tomorrow!');
+      if (TD.ui) TD.ui.toast('Daily done — score '+(this.save.daily.score||0)+'. Come back tomorrow!');
       return false;
     }
     let seed=0; for (const ch of today) seed=(seed*31+ch.charCodeAt(0))>>>0;
@@ -1450,6 +1760,9 @@ TD.Game = class {
   finish(win){
     this.state=win?'won':'lost';
     this.waveActive=false;
+    // dramatic punch-in on the base
+    if (this.basePos){ this.eng.focus(this.basePos.x,this.basePos.z);
+      this.eng.tSize=Math.min(this.eng.tSize,14); this.eng.shakeCam(win?0.3:0.8); }
     if (TD.Net&&TD.Net.connected&&TD.Net.role==='host') TD.Net.send({t:'end',win});
     if (this.daily){
       const score=this.wave*100+this.runKills;
@@ -1462,6 +1775,7 @@ TD.Game = class {
       this.save.research+=50; this.runResearch+=50;
       TD.Audio.sfx('win');
     } else TD.Audio.sfx('lose');
+    if (TD.ui&&TD.ui.flash) TD.ui.flash(win?'green':'red',0.9);
     this.persist();
     if (TD.ui) TD.ui.showResults(win);
   }
@@ -1569,8 +1883,24 @@ TD.Game = class {
       const k=2*(this.hasPerk('adrenaline')?1.5:1);
       for (const ab of this.abilities) ab.charge=Math.min(ab.def.need,ab.charge+k);
     }
+    // kill streaks — chain kills for bonus gold + a flashy callout
+    if (this.killT>0) this.streak=(this.streak||0)+1; else this.streak=1;
+    this.killT=1.6;
+    if (this.streak>=5&&this.streak%5===0){
+      const bonus=Math.min(50,this.streak*2);
+      this.gold+=bonus;
+      this.eng.text(e.center(),'RAMPAGE x'+this.streak+'!  +$'+bonus,'#ff6b6b',true);
+      this.eng.shakeCam(0.25);
+      TD.Audio.sfx('research');
+    }
     // scrap crates
     if (!this.showcase&&Math.random()<0.12*(this.hasPerk('scavenger')?2:1)) this.dropCrate(e.pos);
+    // golden VIP: guaranteed one big crate
+    if (!this.showcase&&e.def.vip){
+      this.dropCrate(e.pos,true);
+      this.eng.ring(e.pos,3,0xffd166,0.7);
+      this.eng.shakeCam(0.5);
+    }
   }
   destroyEnemy(e){
     if (e.dead) return;
@@ -1592,7 +1922,8 @@ TD.Game = class {
     if (this.showcase){ this.baseHp=this.baseMaxHp; return; } // lab dummies can't hurt you
     this.shieldT=12;
     if (this.shield>0){ const a=Math.min(this.shield,d); this.shield-=a; d-=a; }
-    if (d>0){ this.baseHp-=d; TD.Audio.sfx('baseHit'); this.eng.shakeCam(Math.min(0.9,0.25+d/400)); }
+    if (d>0){ this.baseHp-=d; TD.Audio.sfx('baseHit'); this.eng.shakeCam(Math.min(0.9,0.25+d/400));
+      if (TD.ui&&TD.ui.flash) TD.ui.flash('red',Math.min(0.6,0.25+d/500)); }
     this.eng.setBaseStress(this.baseModel,Math.max(0,this.baseHp/this.baseMaxHp));
     if (this.baseHp<=0){ this.baseHp=0; this.finish(false); }
   }
@@ -1747,6 +2078,7 @@ TD.Game = class {
     if ((this.state!=='playing'&&this.state!=='prep')||this.paused) return;
     if (this.state==='prep') return; // just the ghost, no sim yet
     this.updateAbilities(dt);
+    if (this.killT>0) this.killT-=dt;
     this.updateCrates(dt);
     // model lab: a steady parade of every vehicle type
     if (this.showcase){
@@ -1765,7 +2097,7 @@ TD.Game = class {
         if (this.enemies.filter(e=>!e.dead).length<C.MAX_ENEMIES){
           const e=new Enemy(this,s.type,s.angle,this.wave,this.rollAffix(s.type));
           this.enemies.push(e);
-          if (s.type==='boss'){
+          if (TD.ENEMIES[s.type]&&TD.ENEMIES[s.type].boss){
             // escort shield vans: boss is near-invulnerable until they die
             const v1=new Enemy(this,'shieldvan',s.angle-0.14,this.wave);
             const v2=new Enemy(this,'shieldvan',s.angle+0.14,this.wave);
@@ -1905,6 +2237,7 @@ P.puppetStats=function(id,tiers,elev){
     freezeProb:0, freezeDur:0, spreadOnDeath:false, lowBoost:false, baseHpMul:1, shield:0, targets:d.targets };
   tiers.forEach((tier,pi)=>{ for(let k=0;k<tier;k++) TD._applyMod(s,d.paths[pi].tiers[k].mod); });
   s.range+=(elev||0)*C.ELEV_RANGE_BONUS;
+  if (TD.materialOf&&TD.materialOf(id)==='gold'){ s.dmg*=1.30; s.rof*=1.20; s.range*=1.15; }
   return s;
 };
 P.guestMeta=function(m){

@@ -24,8 +24,8 @@ TD.Engine = class {
     this.updateCamera();
 
     // --- lights ---
-    this.scene.add(new THREE.HemisphereLight(0xd6e6ff, 0x445040, 0.65));
-    const sun = new THREE.DirectionalLight(0xfff2dd, 1.05);
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8fae6e, 0.5));
+    const sun = new THREE.DirectionalLight(0xfff6d8, 0.75);
     sun.position.set(60,95,30);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024,1024);
@@ -41,6 +41,9 @@ TD.Engine = class {
     this.time = 0;
     this.animated = new Set();
     this._boxGeo = new THREE.BoxGeometry(1,1,1);
+    this._skyGroup=new THREE.Group(); this.scene.add(this._skyGroup);
+    this._clouds=[]; this.weather=null; this._baseAura=null;
+    this.makeSky();
     this.initFX();
     this.resize();
   }
@@ -204,8 +207,8 @@ TD.Engine = class {
       pts.push(new THREE.Vector3(Math.cos(a)*W/2*1.02,0.2,Math.sin(a)*W/2*1.02)); }
     sc.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
       new THREE.LineBasicMaterial({color:0xef4444})));
-    sc.add(new THREE.HemisphereLight(0xd6e6ff,0x445040,0.9));
-    const dl=new THREE.DirectionalLight(0xfff2dd,1.1); dl.position.set(30,50,15); sc.add(dl);
+    sc.add(new THREE.HemisphereLight(0xffffff,0x8fae6e,0.55));
+    const dl=new THREE.DirectionalLight(0xfff6d8,0.75); dl.position.set(30,50,15); sc.add(dl);
     const k=W*0.60;
     const cam=new THREE.OrthographicCamera(-k,k,k,-k,1,400);
     cam.position.set(60,80,60); cam.lookAt(0,0,0);
@@ -218,6 +221,9 @@ TD.Engine = class {
   buildMap(map){
     if (this.mapGroup) this.scene.remove(this.mapGroup);
     this.animated.clear();
+    if (this._sun) this.animated.add(this._sun);
+    this.makeWeather(map);
+    if (this._baseAura){ this.scene.remove(this._baseAura); this._baseAura=null; }
     const C=TD.CONFIG, grp=new THREE.Group();
     this.scene.background=new THREE.Color(map.pal.sky);
 
@@ -229,6 +235,9 @@ TD.Engine = class {
     const apron=new THREE.Mesh(new THREE.PlaneGeometry(this.worldSize*5,this.worldSize*5),
       this.mat(new THREE.Color(map.pal.sky).offsetHSL(0,0,0.03).getHex(),{r:1}));
     apron.rotation.x=-Math.PI/2; apron.position.y=-0.08; apron.receiveShadow=true; grp.add(apron);
+
+    // sunken lake ring removed — land builds only
+    map._waterCells=[];
 
     // terrain: rocks + mountain massifs
     const terr=TD.mapTerrain(map);
@@ -1160,7 +1169,7 @@ TD.Engine = class {
     const pad=new THREE.Mesh(new THREE.PlaneGeometry(C*wid*0.98,C*len*0.98),
       new THREE.MeshBasicMaterial({ color:0x4ade80, transparent:true, opacity:0.35, side:THREE.DoubleSide, depthWrite:false }));
     pad.rotation.x=-Math.PI/2; pad.position.y=0.04; pad.scale.setScalar(inv); g.add(pad); g.userData.pad=pad;
-    if (kind==='tower'){
+    if (kind==='tower'&&TD.TOWERS[id].range>0){
       const rr=this.makeRangeRing(TD.TOWERS[id].range*C, 0x7dd3fc);
       this.scene.remove(rr); rr.scale.setScalar(inv); g.add(rr); g.userData.rring=rr;
     }
@@ -1182,6 +1191,124 @@ TD.Engine = class {
   }
 
   /* ============ frame ============ */
+  _softTex(){
+    const cv=document.createElement('canvas'); cv.width=cv.height=64;
+    const g=cv.getContext('2d');
+    const gr=g.createRadialGradient(32,32,4,32,32,32);
+    gr.addColorStop(0,'rgba(255,255,255,0.9)');
+    gr.addColorStop(1,'rgba(255,255,255,0)');
+    g.fillStyle=gr; g.fillRect(0,0,64,64);
+    const t=new THREE.CanvasTexture(cv);
+    t.encoding=THREE.sRGBEncoding;
+    return t;
+  }
+  _discTex(){
+    const cv=document.createElement('canvas'); cv.width=cv.height=128;
+    const g=cv.getContext('2d');
+    g.clearRect(0,0,128,128);
+    const gr=g.createRadialGradient(64,64,4,64,64,64);
+    gr.addColorStop(0,'rgba(235,240,246,0.55)');
+    gr.addColorStop(0.7,'rgba(235,240,246,0.2)');
+    gr.addColorStop(1,'rgba(235,240,246,0)');
+    g.fillStyle=gr; g.fillRect(0,0,128,128);
+    g.strokeStyle='rgba(235,240,246,0.9)'; g.lineWidth=2.5;
+    for(let i=0;i<6;i++){
+      const a=i/6*Math.PI*2;
+      g.beginPath(); g.moveTo(64,64); g.lineTo(64+Math.cos(a)*58,64+Math.sin(a)*58); g.stroke();
+    }
+    g.strokeStyle='rgba(235,240,246,0.5)'; g.lineWidth=1.5;
+    g.beginPath(); g.arc(64,64,40,0,7); g.stroke();
+    const t=new THREE.CanvasTexture(cv);
+    t.encoding=THREE.sRGBEncoding;
+    return t;
+  }
+  makeSky(){
+    const tex=this._softTex();
+    for(let i=0;i<7;i++){
+      const c=new THREE.Mesh(new THREE.PlaneGeometry(30+Math.random()*34,15+Math.random()*16),
+        new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:0.15+Math.random()*0.1,depthWrite:false}));
+      const a=Math.random()*Math.PI*2, r=58+Math.random()*55;
+      c.position.set(Math.cos(a)*r,26+Math.random()*16,Math.sin(a)*r);
+      c.userData.spd=(0.4+Math.random()*0.8)*(Math.random()<0.5?1:-1);
+      this._clouds.push(c); this._skyGroup.add(c);
+    }
+    this._sun=new THREE.Mesh(new THREE.PlaneGeometry(70,70),
+      new THREE.MeshBasicMaterial({map:this._softTex(),transparent:true,opacity:0.85,depthWrite:false,blending:THREE.AdditiveBlending}));
+    this._sun.position.set(-80,95,-60);
+    this._skyGroup.add(this._sun);
+    this.animated.add(this._sun);
+    this._sun.userData.anim=(dt,t)=>{ this._sun.material.opacity=0.7+Math.sin(t*0.7)*0.18; };
+  }
+  makeWeather(map){
+    if (this.weather){ this.scene.remove(this.weather); this.weather=null; }
+    const w=map.weather||'none';
+    if (w==='none') return;
+    const N=w==='leaf'?70:95;
+    const pos=new Float32Array(N*3), cols=new Float32Array(N*3);
+    const vel=[], size=this.worldSize/2+12;
+    const col=w==='leaf'? new THREE.Color(0x8fdcb0) : w==='ash'? new THREE.Color(0xa8957e) : w==='dust'? new THREE.Color(0xd8c9a0) : new THREE.Color(0xbfe4f2);
+    for(let i=0;i<N;i++){
+      pos[i*3]=(Math.random()*2-1)*size; pos[i*3+1]=Math.random()*32; pos[i*3+2]=(Math.random()*2-1)*size;
+      cols[i*3]=col.r*(0.7+Math.random()*0.3); cols[i*3+1]=col.g*(0.7+Math.random()*0.3); cols[i*3+2]=col.b*(0.7+Math.random()*0.3);
+      vel.push({ x:(Math.random()-0.5)*0.7, y:(w==='rain'?-3.2-Math.random()*1.6:-0.7-Math.random()*0.9), z:(Math.random()-0.5)*0.7 });
+    }
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+    geo.setAttribute('color', new THREE.BufferAttribute(cols,3));
+    const pts=new THREE.Points(geo, new THREE.PointsMaterial({size:w==='leaf'?0.42:0.24,vertexColors:true,transparent:true,opacity:w==='leaf'?0.55:0.45,depthWrite:false,sizeAttenuation:true}));
+    pts.userData.vel=vel; pts.userData.size=size; pts.userData.top=32;
+    this.weather=pts; this.scene.add(pts);
+  }
+  baseAura(pos){
+    if (this._baseAura){ this.scene.remove(this._baseAura); this._baseAura=null; }
+    const g=new THREE.Group(); g.position.copy(pos); this.scene.add(g); this._baseAura=g;
+    const ring=new THREE.Mesh(new THREE.RingGeometry(1.5,1.8,40), new THREE.MeshBasicMaterial({color:0x4ade80,transparent:true,opacity:0.5,side:THREE.DoubleSide,depthWrite:false}));
+    ring.rotation.x=-Math.PI/2; ring.position.y=0.07; g.add(ring);
+    ring.userData.anim=(dt,t)=>{ ring.material.opacity=0.3+Math.sin(t*2.6)*0.22; };
+    this.animated.add(ring);
+    const beam=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.9,5,14,1,true),
+      new THREE.MeshBasicMaterial({color:0x4ade80,transparent:true,opacity:0.14,depthWrite:false,side:THREE.DoubleSide}));
+    beam.position.y=2.5; g.add(beam);
+    beam.userData.anim=(dt,t)=>{ beam.material.opacity=0.1+Math.sin(t*2)*0.05; };
+    this.animated.add(beam);
+    const orb=new THREE.Mesh(new THREE.SphereGeometry(0.3,14,10), new THREE.MeshBasicMaterial({color:0x8ff0b8,transparent:true,opacity:0.85}));
+    g.add(orb);
+    orb.userData.anim=(dt,t)=>{ orb.position.y=2.3+Math.sin(t*1.7)*0.55; };
+    this.animated.add(orb);
+  }
+  goldCrateGlow(model){
+    const ring=new THREE.Mesh(new THREE.RingGeometry(0.9,1.15,24), new THREE.MeshBasicMaterial({color:0xffd166,transparent:true,opacity:0.8,depthWrite:false}));
+    ring.rotation.x=-Math.PI/2; ring.position.y=0.12; model.add(ring);
+    ring.userData.anim=(dt,t)=>{ ring.scale.setScalar(1+Math.sin(t*5)*0.12); ring.material.opacity=0.5+Math.sin(t*5)*0.3; };
+    this.animated.add(ring);
+    const orb=new THREE.Mesh(new THREE.SphereGeometry(0.28,10,8), new THREE.MeshBasicMaterial({color:0xffd166,transparent:true,opacity:0.9}));
+    orb.position.y=0.55; model.add(orb);
+    orb.userData.anim=(dt,t)=>{ orb.position.y=0.55+Math.sin(t*4)*0.15; };
+    this.animated.add(orb);
+  }
+  sqBurst(pos,color,count=6,spd=3,size=0.16,life=0.5){
+    for(let i=0;i<count;i++){
+      const m=new THREE.Mesh(this._boxGeo, this.mat(color,{e:1.1}));
+      m.material.transparent=true;
+      const dir=new THREE.Vector3((Math.random()-0.5)*2,0.3+Math.random()*1.1,(Math.random()-0.5)*2).normalize();
+      m.position.copy(pos).add(new THREE.Vector3((Math.random()-0.5)*0.25,Math.random()*0.2,(Math.random()-0.5)*0.25));
+      m.scale.setScalar(size*(0.6+Math.random()*0.8));
+      m.userData.vel=dir.multiplyScalar(spd*(0.5+Math.random()));
+      m.userData.life=life*(0.7+Math.random()*0.6);
+      m.userData.max=life;
+      this.scene.add(m);
+      const self=this;
+      m.userData.anim=(dt,t)=>{
+        m.userData.life-=dt;
+        if (m.userData.life<=0){ self.scene.remove(m); self.animated.delete(m); return; }
+        m.position.addScaledVector(m.userData.vel,dt);
+        m.userData.vel.y-=dt*6;
+        m.rotation.x+=dt*5; m.rotation.y+=dt*6; m.rotation.z+=dt*4;
+        m.material.opacity=Math.max(0,Math.min(1,m.userData.life/m.userData.max*1.6));
+      };
+      this.animated.add(m);
+    }
+  }
   update(dt){
     this.time+=dt;
     this.smoothCamera(dt);
@@ -1194,6 +1321,22 @@ TD.Engine = class {
       this.camera.position.z+=(Math.random()-0.5)*s;
     }
     for (const o of this.animated){ if(o.userData.anim) o.userData.anim(dt,this.time); }
+    // ambient weather particles
+    if (this.weather){
+      const w=this.weather, pos=w.geometry.attributes.position, vel=w.userData.vel, size=w.userData.size, top=w.userData.top;
+      const arr=pos.array;
+      for(let i=0;i<vel.length;i++){
+        arr[i*3]+=vel[i].x*dt; arr[i*3+1]+=vel[i].y*dt; arr[i*3+2]+=vel[i].z*dt;
+        if (arr[i*3+1]<0) arr[i*3+1]=top;
+        if (arr[i*3]>size) arr[i*3]=-size; else if (arr[i*3]<-size) arr[i*3]=size;
+        if (arr[i*3+2]>size) arr[i*3+2]=-size; else if (arr[i*3+2]<-size) arr[i*3+2]=size;
+      }
+      pos.needsUpdate=true;
+    }
+    for (const c of this._clouds){
+      c.position.x+=c.userData.spd*dt;
+      if (Math.abs(c.position.x)>this.worldSize*1.5) c.position.x=-c.position.x;
+    }
     for (let i=this.tweens.length-1;i>=0;i--){
       const tw=this.tweens[i]; tw.t+=dt;
       const k=Math.min(1,tw.t/tw.dur); tw.fn(k);

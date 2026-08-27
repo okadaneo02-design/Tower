@@ -7,7 +7,8 @@ TD.Net=(function(){
   const N={ role:null, connected:false, code:null, onOpen:null, onClose:null, onMsg:null };
   function wire(c){
     conn=c;
-    conn.on('open',()=>{ N.connected=true; if(N.onOpen) N.onOpen(); });
+    const opened=()=>{ if(!N.connected){ N.connected=true; if(N.onOpen) N.onOpen(); } };
+    if (c.open) opened(); else c.on('open',opened);   // may already be open when we attach
     conn.on('data',m=>{ if(N.onMsg) N.onMsg(m); });
     conn.on('close',()=>{ N.connected=false; if(N.onClose) N.onClose(); });
     conn.on('error',()=>{ N.connected=false; if(N.onClose) N.onClose(); });
