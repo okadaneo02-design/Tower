@@ -77,6 +77,9 @@ TD.art = (function(){
     vacuum:'<path d="M16 2 l4 5 -8 0 z" fill="#86efac"/>'+
        '<path d="M12 7 h8 l-1.6 10 a2.6 2.6 0 0 1 -4.8 0 z" fill="#39424d"/>'+
        '<path d="M14.5 16 l1.5 -4 1.5 4 z" fill="#d8f7ea"/>',
+    barracks:'<path d="M4 22 h24 v-3 h-24 z" fill="#4a5563"/>'+
+         '<path d="M6 19 v-6 h6 v6 z M14 19 v-9 h6 v9 z M22 19 v-7 h5 v7 z" fill="#86efac"/>'+
+         '<path d="M12 3 l2.5 3.5 h-5 z" fill="#4ade80"/>',
     orbital:'<path d="M16 2 l3.5 7 7 3.5 -7 3.5 -3.5 7 -3.5 -7 -7 -3.5 7 -3.5 z" fill="#ff9f6e"/>'+
        '<circle cx="24" cy="24" r="4" fill="#ff6b6b"/>',
     overclock:'<path d="M17 2 L8 18 h6 l-2 12 11 -16 h-6 z" fill="#ffd34d"/>',

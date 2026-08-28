@@ -45,15 +45,6 @@ TD.MAPS = [
     pal:{ ground:0xc7a184, ground2:0xb89378, rock:0x9a8573, sky:0x665743 }, seed:129, rockN:12, mtnN:4 },
   { id:4, name:'Ashfall',      desc:'Burned peaks. Everything comes at once.', weather:'ash',
     pal:{ ground:0xc79a8f, ground2:0xb98a80, rock:0x8a7a76, sky:0x665057 }, seed:200, rockN:9, mtnN:3 },
-  { id:5, name:'New Tower City', desc:'Skyline rooftop defense — turrets on buildings rule the streets.', weather:'city',
-    pal:{ ground:0x46525e, ground2:0x3b4550, rock:0x8a93a3, sky:0x2b3350 }, seed:314, rockN:0, mtnN:0, traffic:true,
-    bldgs:[ [5,4,2],[8,4,3],[11,4,2],[14,4,3],
-      [5,7,3],[8,7,2],[11,7,3],[14,7,2],[17,7,2],
-      [5,11,2],[8,11,3],[11,11,2],[14,11,3],[17,11,3],
-      [6,15,3],[9,15,2],[12,15,3],[15,15,2],
-      [6,19,2],[9,19,3],[12,19,2],[15,19,3],[18,19,2],
-      [5,23,3],[8,23,2],[11,23,3],[14,23,2],
-      [20,12,2],[22,16,3],[21,20,2] ] },
 ];
 // deterministic terrain per map: scattered rocks + mountain clusters
 TD.mapTerrain = function(map){
@@ -477,9 +468,31 @@ vacuum: { id:'vacuum', name:'The Vacuum', role:'Crate magnet', cost:120, slotCos
     {name:'Gold Refinery',  cost:260, desc:'+30% crate value', mod:{vacValMul:1.3}},
     {name:'Mint',           cost:540, desc:'+35% crate value', mod:{vacValMul:1.35}},
     {name:'PRIVATE MINT',   cost:1150,desc:'+50% crate value', mod:{vacValMul:1.5}}]}]},
+
+barracks: { id:'barracks', name:'Barracks', role:'Friendly assault', cost:260, slotCost:2, color:0x86efac, icon:'',
+  desc:'Spawns friendly vehicles (green ring = friendly) that hunt and ram enemies. The T5 tank unit shoots from afar.', targets:'-', arche:'barracks', range:6, rof:0.35, dmg:0, sfx:'place',
+  paths:[
+   {name:'Deployment', tiers:[
+    {name:'Motor Pool',    cost:60,   desc:'+1 vehicle cap', mod:{barNAdd:1}},
+    {name:'Garage',        cost:150,  desc:'+1 vehicle cap', mod:{barNAdd:1}},
+    {name:'Armory',        cost:340,  desc:'+2 vehicle cap, +40 HP', mod:{barNAdd:2, barHpAdd:40}},
+    {name:'War Factory',   cost:720,  desc:'+2 vehicle cap, +60 HP', mod:{barNAdd:2, barHpAdd:60}},
+    {name:'MAIN BATTLE TANK',cost:1600,desc:'Spawns armored TANKS — +150 HP, they shoot from afar', mod:{barNAdd:3, barHpAdd:150, barTank:true}}]},
+   {name:'War Chariots', tiers:[
+    {name:'Rust Buckets',  cost:50,   desc:'+25% ram damage', mod:{barDmgMul:1.25}},
+    {name:'Bumpers',       cost:120,  desc:'+25% ram damage', mod:{barDmgMul:1.25}},
+    {name:'Reinforced',    cost:270,  desc:'+30% ram damage, +20 HP', mod:{barDmgMul:1.3, barHpAdd:20}},
+    {name:'Battering Rams',cost:560,  desc:'+35% ram damage, +30 HP', mod:{barDmgMul:1.35, barHpAdd:30}},
+    {name:'TANK PLOW',     cost:1250, desc:'+50% ram damage, +50 HP', mod:{barDmgMul:1.5, barHpAdd:50}}]},
+   {name:'Tactics', tiers:[
+    {name:'Drivers',       cost:55,   desc:'+20% speed', mod:{barSpdMul:1.2}},
+    {name:'Rally Point',   cost:130,  desc:'+20% speed', mod:{barSpdMul:1.2}},
+    {name:'Charge Orders', cost:290,  desc:'+25% speed', mod:{barSpdMul:1.25}},
+    {name:'Cannon Crew',   cost:620,  desc:'+30% speed, tanks shoot +30% faster', mod:{barSpdMul:1.3, barRofMul:1.3}},
+    {name:'BLITZKRIEG',    cost:1400, desc:'+40% speed, +1 vehicle cap', mod:{barSpdMul:1.4, barNAdd:1}}]}]},
 };
 TD.PATH_TAGS = ['RATE','SYSTEMS','POWER'];
-TD.DEFAULT_UNLOCKED = ['mg','sniper','minigun','flame','laser','vacuum'];
+TD.DEFAULT_UNLOCKED = ['mg','sniper','minigun','flame','laser','vacuum','barracks'];
 
 /* ---------------- TECH TREE ---------------- */
 TD.TECH = [

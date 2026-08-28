@@ -8,7 +8,7 @@ TD.ui = (function(){
   const artSpan=id=>'<span class="mic" style="background-image:url('+ART(id)+')"></span>';
 
   let pickT=['mg','sniper'], pickB=['block','wire','trap'];
-  let selMap=0, selDiff='normal', selEndless=false;
+  let selMap=0, selDiff='normal', selEndless=false, selHorde=false;
   let cheatSeq=[];
 
   function init(g,e){
@@ -95,7 +95,7 @@ function buildTitle(){
   }
 
   /* ============ MAP SELECT ============ */
-  let mapGrid,diffRow,endBtn;
+  let mapGrid,diffRow,endBtn,modeRow;
   function buildMapSelect(){
     const s=el('div','screen');
     const back=el('div','back-row'); const bb=el('button','btn small','← Back');
@@ -104,7 +104,7 @@ function buildTitle(){
     s.append(el('div','h2sub','Vehicles pour in from the red ring — the whole edge is hostile.'));
     mapGrid=el('div','map-grid'); s.append(mapGrid);
     diffRow=el('div','diff-row'); s.append(diffRow);
-    const modeRow=el('div','mode-row');
+    modeRow=el('div','mode-row');
     endBtn=el('button','btn small','∞ ENDLESS: OFF');
     endBtn.onclick=()=>{ selEndless=!selEndless; paintMapSelect(); };
     modeRow.append(endBtn); s.append(modeRow);
@@ -144,6 +144,12 @@ function buildTitle(){
     endBtn.disabled=!canEndless;
     endBtn.textContent=canEndless?('∞ ENDLESS: '+(selEndless?'ON':'OFF')):'∞ ENDLESS (beat the campaign first)';
     endBtn.style.borderColor=selEndless&&canEndless?'var(--accent)':'';
+    modeRow.innerHTML='';
+    const tds=el('button','mode-pill'+(selHorde?'':' sel-tds'),'TDS — follow the track');
+    tds.onclick=()=>{ selHorde=false; paintMapSelect(); };
+    const horde=el('button','mode-pill'+(selHorde?' sel-horde':''),'HORDE — every direction');
+    horde.onclick=()=>{ selHorde=true; paintMapSelect(); };
+    modeRow.append(tds,horde,endBtn);
   }
 
   /* ============ LOADOUT (9 weight points + 3 blocks) ============ */
@@ -192,7 +198,7 @@ function buildTitle(){
     startBtn.style.width='100%';
     startBtn.onclick=()=>{
       if (!pickT.length){ warnEl.textContent='Bring at least one turret!'; TD.Audio.sfx('error'); return; }
-      game.startRun(selMap,selDiff,{towers:[...pickT],blocks:[...pickB]},selEndless);
+      game.startRun(selMap,selDiff,{towers:[...pickT],blocks:[...pickB]},selEndless,selHorde);
       const ld=el('div','screen overlay deploy-load');
       ld.innerHTML='<div class="result-box"><div class="h2">DEPLOYING DEFENSES</div><div class="load-bar"><div class="load-fill"></div></div><div class="h2sub">moving pieces into position…</div></div>';
       root.append(ld);
@@ -434,7 +440,7 @@ function buildTitle(){
         b.onclick=()=>selectBuild('block',id);
         buildBar.append(b);
       });
-      blkCount=el('div','blk-count','0/'+TD.CONFIG.BLOCK_LIMIT);
+      blkCount=el('div','blk-count',game.blocks.length+' blocks');
       blkCount.title='Blocks placed / limit';
       buildBar.append(blkCount);
     }
@@ -495,8 +501,7 @@ function buildTitle(){
       const d=b.dataset.kind==='tower'?TD.TOWERS[b.dataset.id]:TD.BLOCKS[b.dataset.id];
       b.classList.toggle('cant',game.gold<d.cost);
     });
-    if (blkCount){ blkCount.textContent=game.blocks.length+'/'+TD.CONFIG.BLOCK_LIMIT;
-      blkCount.classList.toggle('full',game.blocks.length>=TD.CONFIG.BLOCK_LIMIT); }
+    if (blkCount){ blkCount.textContent=game.blocks.length+' blocks'; }
     if (bossRef){ if(bossRef.dead) bossBar(null); else bossFill.style.width=(bossRef.hp/bossRef.maxHp*100)+'%'; }
     if (game.selected&&!game.selected.isBlock&&panelTower===game.selected){
       const k=$('#tp-kills'); if(k) k.textContent=game.selected.kills;
@@ -625,6 +630,17 @@ function buildTitle(){
     const row=el('div','row-gap');
     const again=el('button','btn',win?'PLAY AGAIN':'TRY AGAIN');
     again.onclick=()=>{ s.remove(); game.startRun(game.map.id,game.diffId,game.loadout,game.endless); buildBuildBar(); show('hud'); };
+    if (!win&&game.wave>0){
+      const rewind=el('button','btn rewind',`⟲ REWIND 1 WAVE <span class="sub">5 RESEARCH · +$1000</span>`);
+      rewind.onclick=()=>{
+        if (game.save.research<5){ TD.Audio.sfx('error'); toast('Need 5 research for a rewind'); return; }
+        game.save.research-=5; game.persist();
+        game.continueFromWave();
+        s.remove(); buildBuildBar(); show('hud'); updateHUD();
+        toast('REWOUND — wave '+game.wave+' awaits, +$1000');
+      };
+      row.append(rewind);
+    }
     const menu=el('button','btn primary','MAIN MENU');
     menu.onclick=()=>{ s.remove(); game.quitRun(); show('title'); };
     row.append(again,menu); box.append(row); s.append(box);
@@ -803,7 +819,10 @@ function buildTitle(){
           const w=pick(e); if(w) game.confirmAbility(w);
         } else if (game.placing){
           const w=pick(e); const ov=hoverCellOverride(e);
-          if (w||ov) game.clickAt(w||new THREE.Vector3(),ov);
+          if (e.shiftKey&&game.placing.kind!=='base'){
+            const c=ov||(w&&game.eng.worldToCell(w));
+            if (c) game.bulkPlace(c.c,c.r);
+          } else if (w||ov) game.clickAt(w||new THREE.Vector3(),ov);
         } else {
           const n=ndc(e);
           // scrap crates grab first, then turrets/blocks, then ground

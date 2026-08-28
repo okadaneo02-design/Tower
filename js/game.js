@@ -23,6 +23,12 @@ function applyMod(s,m){
       case 'volleyAdd': s.volley+=v; break;
       case 'vacPullMul': s.vacPullMul*=v; break;
       case 'vacValMul': s.vacValMul*=v; break;
+      case 'barNAdd': s.barN+=v; break;
+      case 'barHpAdd': s.barHp+=v; break;
+      case 'barDmgMul': s.barDmgMul*=v; break;
+      case 'barSpdMul': s.barSpdMul*=v; break;
+      case 'barRofMul': s.barRofMul*=v; break;
+      case 'barTank': s.barTank=true; break;
       case 'minRangeSub': s.minRange=Math.max(0,s.minRange-v); break;
       case 'slowAdd': s.slow+=v; break;
       case 'slowDur': s.slowDur=Math.max(s.slowDur,v); break;
@@ -109,7 +115,7 @@ class Tower {
       freezeProb:0, freezeDur:0, spreadOnDeath:false, lowBoost:false, baseHpMul:1, shield:0,
       aaDmg:d.aaDmg||0, aaRof:d.aaRof||0, planeN:d.planeN||0, planeSpd:d.planeSpd||1,
       planeDmg:d.planeDmg||0, bombDmg:d.bombDmg||0, heliRange:d.heliRange||6, chargeT:d.chargeT||0.6, ability:null,
-      vacPullMul:1, vacValMul:1,
+      vacPullMul:1, vacValMul:1, barN:0, barHp:0, barDmgMul:1, barSpdMul:1, barRofMul:1, barTank:false,
       targets:d.targets };
     this.tiers.forEach((tier,pi)=>{ for(let k=0;k<tier;k++) applyMod(s, d.paths[pi].tiers[k].mod); });
     s.dmg*=1+g.techDmg; s.range*=1+g.techRange;
@@ -186,6 +192,7 @@ class Tower {
     }
     const arche=this.def.arche;
     if (arche==='aura'||arche==='bank'||arche==='repair') return;
+    if (arche==='barracks'){ this.updateBarracks(dt); return; }
     if (arche==='vacuum'){
       // sucks every crate in range straight into the intake
       const g2=this.game, R=s.range*C.CELL;
@@ -271,6 +278,118 @@ class Tower {
       this.abilityCd-=dt;
       if (this.abilityCd<=0 && this.target) this.castAbility();
     }
+  }
+  updateBarracks(dt){
+    const g=this.game, s=this.stats;
+    if (!this.barUnits) this.barUnits=[];
+    const units=this.barUnits;
+    this.barT=(this.barT||0)+dt;
+    const cap=2+s.barN;
+    if (units.length<cap&&this.barT>=2.5){ this.barT=0; this.spawnBarUnit(s); }
+    if (!units.length) return;
+    // ---- claim budget: how many friendlies a target needs (1 if any single
+    // unit can take it down, else exactly as many as it takes — no extras) ----
+    const claims=new Map();
+    for (const e of g.enemies){
+      if (e.dead||e.def.fly||e.absorbing) continue;
+      let bestKill=0, solo=false;
+      for (const u of units){
+        const ram=Math.max(4,u.dmg);
+        const hits=Math.ceil(e.hp/ram);
+        const hitsBeforeDeath=Math.max(1,Math.floor(u.hp/Math.max(0.001,e.hp*0.8)));
+        if (hitsBeforeDeath>=hits) solo=true;
+        bestKill=Math.max(bestKill,Math.min(hits,hitsBeforeDeath)*ram);
+      }
+      claims.set(e, solo?1:Math.max(1,Math.ceil(e.hp/Math.max(1,bestKill))));
+    }
+    // ---- assign: strongest units first, keep a valid claim if they have one ----
+    const ordered=units.slice().sort((a,b)=>(b.dmg*b.hp)-(a.dmg*a.hp));
+    for (const u of ordered){
+      if (u.target&&!u.target.dead&&claims.has(u.target)&&claims.get(u.target)>0){
+        claims.set(u.target,claims.get(u.target)-1);
+        continue;
+      }
+      let best=null,bd=Infinity;
+      for (const e of g.enemies){
+        if (e.dead||e.def.fly||e.absorbing||!claims.has(e)||claims.get(e)<=0) continue;
+        const dx=e.pos.x-u.pos.x,dz=e.pos.z-u.pos.z,d2=dx*dx+dz*dz;
+        if (d2<bd){ bd=d2; best=e; }
+      }
+      u.target=best||null;
+      if (best) claims.set(best,claims.get(best)-1);
+    }
+    // ---- drive & fight ----
+    for (let i=units.length-1;i>=0;i--){
+      const u=units[i], best=u.target;
+      if (best){
+        const dx=best.pos.x-u.pos.x,dz=best.pos.z-u.pos.z,d=Math.sqrt(dx*dx+dz*dz);
+        u.model.rotation.y=Math.atan2(dx,dz);
+        if (d<1.15*C.CELL){
+          u.cd=(u.cd||0)-dt;
+          if (u.cd<=0){
+            u.cd=0.7;
+            const ehp=best.hp;
+            g.hitEnemy(best,Math.round(u.dmg),{tower:this});
+            if (!best.dead) u.hp-=Math.round(ehp*0.8);  // friendly eats 80% of the victim's HP
+            g.eng.burst(u.pos.clone().setY(0.6),0x4ade80,8,3,0.35,4);
+            g.eng.shake(best.model);
+            TD.Audio.sfx('hit');
+          }
+        } else {
+          const spd=s.barSpdMul*2.6*C.CELL;
+          u.pos.x+=dx/d*dt*spd; u.pos.z+=dz/d*dt*spd;
+          u.model.position.x=u.pos.x; u.model.position.z=u.pos.z;
+          if (u.wheels) for (const w of u.wheels) w.rotation.x+=dt*10;
+        }
+        if (u.tank){
+          u.shot=(u.shot||0)-dt;
+          if (u.shot<=0&&d<4.5*C.CELL){
+            u.shot=1.6/(s.barRofMul||1);
+            const mp=u.model.position.clone().setY(1.2);
+            g.eng.beam(mp,best.center(),0x9ff0c8,0.05,0.08);
+            g.eng.muzzleFlash(mp,0x9ff0c8,1.2);
+            g.hitEnemy(best,Math.round(40*s.barDmgMul),{tower:this});
+            TD.Audio.sfx('rail');
+          }
+        }
+      } else {
+        const dx=this.pos.x-u.pos.x,dz=this.pos.z-u.pos.z,d=Math.sqrt(dx*dx+dz*dz);
+        if (d>0.6){
+          const spd=s.barSpdMul*2.6*C.CELL;
+          u.pos.x+=dx/d*dt*spd; u.pos.z+=dz/d*dt*spd;
+          u.model.position.x=u.pos.x; u.model.position.z=u.pos.z;
+          u.model.rotation.y=Math.atan2(dx,dz);
+          if (u.wheels) for (const w of u.wheels) w.rotation.x+=dt*10;
+        }
+      }
+      if (u.hp<=0){
+        g.eng.mapGroup.remove(u.model);
+        g.eng.explosion(u.pos.clone(),1.4,0x4ade80);
+        units.splice(i,1);
+      }
+    }
+  }
+  spawnBarUnit(s){
+    const g=this.game;
+    let model=null;
+    if (s.barTank){
+      const m=g.eng.asset&&g.eng.asset('tankboss',{len:1.9,tint:0x4ade80,tintAmt:0.45});
+      if (m){ const wrap=new THREE.Group(); wrap.add(m); m.rotation.y=Math.PI; model=wrap; }
+    }
+    if (!model){
+      const cars=['sedan','suv','van'];
+      model=g.eng.asset&&g.eng.asset(cars[(this.barUnits&&this.barUnits.length)%cars.length],{len:1.5,tint:0x4ade80,tintAmt:0.5});
+    }
+    if (!model) return;
+    model.position.copy(this.pos); model.position.y=0.02;
+    g.eng.mapGroup.add(model);
+    g.eng.eliteRing(model,0x4ade80);
+    const u={ model, pos:this.pos.clone(), hp:100+s.barHp, dmg:Math.round(22*s.barDmgMul), spd:s.barSpdMul,
+      tank:!!s.barTank, wheels:[] };
+    model.traverse(o=>{ if(o.isMesh&&/wheel/i.test(o.name)) u.wheels.push(o); });
+    model.userData.owner=u;
+    if (!this.barUnits) this.barUnits=[];
+    this.barUnits.push(u);
   }
   castAbility(){
     const g=this.game, s=this.stats;
@@ -544,10 +663,17 @@ class Enemy {
     this.stealth=!!this.def.stealth; this.detected=false;
     this.dead=false; this.absorbing=false; this.falling=false;
     this.slow=0; this.slowT=0; this.stunT=0; this.burn=null; this.poisons=[]; this.markAmp=0; this.markT=0;
+    this.hordeOff=(Math.random()-0.5)*0.8;
     this.rootCd=0; this.breachT=Math.random(); this.breachTarget=null; this.biteT=0; this.sinkK=0;
     this.jx=(Math.random()-0.5)*0.9; this.jz=(Math.random()-0.5)*0.9;
     const R=game.eng.worldSize/2*1.02;
-    this.pos=new THREE.Vector3(Math.cos(angle)*R,0,Math.sin(angle)*R);
+    if (game.track&&!game.horde&&!this.def.fly){
+      const ws=game.trackW[0];
+      this.pos=new THREE.Vector3(ws.x+(Math.random()-0.5)*1.2,0,ws.z+(Math.random()-0.5)*1.2);
+      this.tIdx=0;
+    } else {
+      this.pos=new THREE.Vector3(Math.cos(angle)*R,0,Math.sin(angle)*R);
+    }
     this.wp=null;
     this.model=game.eng.makeEnemy(type);
     this.model.userData.owner=this;
@@ -567,6 +693,7 @@ class Enemy {
   cell(){ return this.game.eng.worldToCell(this.pos); }
   progress(){
     if (this.def.fly){ const b=this.game.basePos; return Math.hypot(this.pos.x-b.x,this.pos.z-b.z); }
+    if (this.game.track) return (this.game.trackW.length-(this.tIdx||0));
     const c=this.cell(); if(!inB(c.c,c.r)) return 999;
     const d=this.game.dist[idx(c.c,c.r)];
     return d===32767? 999 : d;
@@ -718,10 +845,10 @@ class Enemy {
       this.updateBar(); return;
     }
     const cc=this.cell();
-    if (inB(cc.c,cc.r) && g.dist[idx(cc.c,cc.r)]<=1){ this.startAbsorb(); return; }
+    if (!g.horde&&inB(cc.c,cc.r) && g.dist[idx(cc.c,cc.r)]<=1){ this.startAbsorb(); return; }
     // breach mode: the maze detour is too long — smash through instead
     this.breachT-=dt;
-    if (!this.breachTarget&&this.breachT<=0){ this.breachT=0.9+Math.random()*0.4; this.evalBreach(); }
+    if (!g.horde&&!this.breachTarget&&this.breachT<=0){ this.breachT=0.9+Math.random()*0.4; this.evalBreach(); }
     if (this.breachTarget){
       const b=this.breachTarget;
       if (!g.blocks.includes(b)) this.breachTarget=null;
@@ -746,6 +873,61 @@ class Enemy {
       }
     }
     if (!this.wp) this.nextWp();
+    if (g.track&&!this.def.fly){ // TDS: follow the winding track, cell by cell
+      const tr=g.trackW, ti=this.tIdx||0;
+      if (ti<tr.length){
+        const [cc,rr]=g.track[ti];
+        const st=g.cellStack[idx(cc,rr)];
+        if (st&&st.length){ // something built on the road — smash it
+          const blk=st[st.length-1];
+          const dx=blk.pos.x-this.pos.x,dz=blk.pos.z-this.pos.z;
+          this.model.rotation.y=Math.atan2(dx,dz);
+          this.biteT-=dt;
+          g.eng.animEnemy(this.model,dt,0.15);
+          if (this.biteT<=0){ this.biteT=0.8; g.attackBlock(this,blk); }
+          this.updateBar(); return;
+        }
+        const wp=tr[ti], dx=wp.x-this.pos.x, dz=wp.z-this.pos.z, d=Math.hypot(dx,dz);
+        if (d<0.3){
+          this.tIdx=ti+1;
+          if (this.tIdx>=tr.length){ this.startAbsorb(); return; }
+        } else {
+          const spd=this.speed*(1-this.slow);
+          this.pos.x+=dx/d*spd*dt; this.pos.z+=dz/d*spd*dt;
+          this._lastVel=new THREE.Vector3(dx/d*spd,0,dz/d*spd);
+          this.model.position.set(this.pos.x,this._yOff||0,this.pos.z);
+          this.model.rotation.y=Math.atan2(dx,dz);
+          g.eng.animEnemy(this.model,dt,1-this.slow);
+        }
+      } else { this.startAbsorb(); return; }
+      this.updateBar(); return;
+    }
+    if (g.horde){ // horde: ignore the maze — charge the base from every angle
+      const b=g.basePos, dx=b.x-this.pos.x, dz=b.z-this.pos.z, d=Math.hypot(dx,dz);
+      const a=Math.atan2(dx,dz)+this.hordeOff;
+      // player walls DO block in horde — smash them like the maze walls
+      const ahead=this.pos.clone().add(new THREE.Vector3(Math.sin(a)*0.55,0,Math.cos(a)*0.55));
+      const ac=g.eng.worldToCell(ahead);
+      if (inB(ac.c,ac.r)){
+        const st=g.cellStack[idx(ac.c,ac.r)];
+        if (st&&st.length){
+          const blk=st[st.length-1];
+          this.model.rotation.y=Math.atan2(Math.sin(a),Math.cos(a));
+          this.biteT-=dt;
+          g.eng.animEnemy(this.model,dt,0.15);
+          if (this.biteT<=0){ this.biteT=0.8; g.attackBlock(this,blk); }
+          this.updateBar(); return;
+        }
+      }
+      if (d<1.8){ this.startAbsorb(); return; }
+      const spd=this.speed*(1-this.slow);
+      this.pos.x+=Math.sin(a)*spd*dt; this.pos.z+=Math.cos(a)*spd*dt;
+      this._lastVel=new THREE.Vector3(Math.sin(a)*spd,0,Math.cos(a)*spd);
+      this.model.position.set(this.pos.x,this._yOff||0,this.pos.z);
+      this.model.rotation.y=Math.atan2(Math.sin(a),Math.cos(a));
+      g.eng.animEnemy(this.model,dt,1-this.slow);
+      this.updateBar(); return;
+    }
     if (this.wp){
       const dx=this.wp.x-this.pos.x, dz=this.wp.z-this.pos.z, d=Math.hypot(dx,dz);
       if (d<0.25) this.nextWp();
@@ -967,10 +1149,11 @@ TD.Game = class {
   }
 
   /* ----- run lifecycle ----- */
-  startRun(mapId,diffId,loadout,endless){
+  startRun(mapId,diffId,loadout,endless,horde){
     this.cleanupRun(); // full map reset — no ghosts from the last run
     this.map=TD.MAPS[mapId]; this.diffId=diffId; this.diff=TD.DIFFICULTY[diffId];
-    this.loadout=loadout; this.endless=endless;
+    this.loadout=loadout; this.endless=endless; this.horde=!!horde;
+    this.track=null; this.trackW=null;
     this.eng.buildMap(this.map);
     this.eng.resetCam();
     this.cells=new Uint8Array(G*G);      // 0 empty 1 rock 2 base 3 blocked 5 walkable-block
@@ -997,10 +1180,103 @@ TD.Game = class {
     this.rng=this.daily? this.daily.rng : null;
     if (this.daily&&this.daily.mod.id==='rich') this.gold+=250;
     this.basePos=null; this.baseModel=null;
-    // base placement phase
-    this.state='prep';
-    this.setPlacing('base','base');
-    if (TD.ui) TD.ui.banner('PLACE YOUR BASE','pick your ground — they will come from every direction');
+    if (this.horde){
+      this.state='prep';
+      this.setPlacing('base','base');
+      if (TD.ui) TD.ui.banner('PLACE YOUR BASE','pick your ground — they will come from every direction');
+    } else {
+      // TDS: pre-placed base + a winding track the horde follows
+      const spot=this.findBaseSpot();
+      this.placeBase(spot.c,spot.r);
+      this.buildTrack();
+      this.drawTrack();
+      if (TD.ui) TD.ui.banner('THEY FOLLOW THE TRACK','build along the road — walls off it do nothing');
+    }
+  }
+  findBaseSpot(){
+    const G=TD.CONFIG.GRID, mid=Math.floor(G/2);
+    for(let d=0;d<G;d++) for(let c=mid-d;c<=mid+d;c++) for(let r=mid-d;r<=mid+d;r++){
+      if (Math.max(Math.abs(c-mid),Math.abs(r-mid))!==d) continue;
+      if (this.baseSpotOk(c,r)) return {c,r};
+    }
+    return {c:mid-2,r:mid-2};
+  }
+  buildTrack(){
+    const G=TD.CONFIG.GRID, cells=this.cells, idx2=(c,r)=>r*G+c;
+    // entry gate: open cell on a random border
+    const side=Math.floor(this.rand()*4);
+    let sc,sr;
+    for(let i=0;i<40;i++){
+      const along=3+Math.floor(this.rand()*(G-6));
+      if (side===0){ sc=along; sr=2; } else if(side===1){ sc=along; sr=G-3; }
+      else if(side===2){ sc=2; sr=along; } else { sc=G-3; sr=along; }
+      if (cells[idx2(sc,sr)]===0) break;
+    }
+    // goal: an open cell hugging the base
+    let target=null;
+    for (const [dc,dr] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const c=this.baseC+dc, r=this.baseR+dr;
+      if (inB(c,r)&&cells[idx2(c,r)]===0){ target=[c,r]; break; }
+    }
+    if (!target) target=[this.baseC-1,this.baseR-1];
+    let cur=[sc,sr];
+    const path=[cur.slice()];
+    let guard=0;
+    while (guard++<600){
+      const dx=target[0]-cur[0], dy=target[1]-cur[1];
+      if (Math.abs(dx)+Math.abs(dy)<=4){
+        // walk the last stretch straight to the goal
+        while (cur[0]!==target[0]||cur[1]!==target[1]){
+          const nx=cur[0]+Math.sign(target[0]-cur[0]), ny=cur[1]+Math.sign(target[1]-cur[1]);
+          if (!inB(nx,ny)||cells[idx2(nx,ny)]!==0) break;
+          cur=[nx,ny]; path.push(cur.slice());
+        }
+        break;
+      }
+      const steps=[];
+      if (Math.abs(dx)>0) steps.push([cur[0]+Math.sign(dx),cur[1]]);
+      if (Math.abs(dy)>0) steps.push([cur[0],cur[1]+Math.sign(dy)]);
+      if (this.rand()<0.32){ // wiggle: keep the track winding with turns
+        const perp=this.rand()<0.5? [0,Math.sign(dy)||1] : [Math.sign(dx)||1,0];
+        steps.push([cur[0]+perp[0],cur[1]+perp[1]]);
+      }
+      if (this.rand()<0.18){ // long straight stretch
+        const cont=[cur[0]+Math.sign(dx||1),cur[1]+Math.sign(dy||1)];
+        steps.push([cont[0]+Math.sign(dx||1),cont[1]+Math.sign(dy||1)]);
+      }
+      const opts=steps.filter(([c,r])=>inB(c,r)&&c>=3&&r>=3&&c<=G-4&&r<=G-4
+        &&cells[idx2(c,r)]===0&&!path.some(p=>p[0]===c&&p[1]===r));
+      let next=null;
+      if (opts.length) next=opts[Math.floor(this.rand()*opts.length)];
+      else {
+        const nb=[[1,0],[-1,0],[0,1],[0,-1]].map(([dc,dr])=>[cur[0]+dc,cur[1]+dr])
+          .filter(([c,r])=>inB(c,r)&&cells[idx2(c,r)]===0&&!path.some(p=>p[0]===c&&p[1]===r));
+        if (nb.length) next=nb[Math.floor(this.rand()*nb.length)];
+        else { path.pop(); cur=path[path.length-1]||[sc,sr]; continue; }
+      }
+      cur=next; path.push(cur.slice());
+    }
+    this.track=path;
+    this.trackW=path.map(([c,r])=>this.eng.cellToWorld(c,r));
+  }
+  drawTrack(){
+    const eng=this.eng, W=0.72;
+    for(let i=0;i<this.trackW.length-1;i++){
+      const a=this.trackW[i], b=this.trackW[i+1];
+      const dx=b.x-a.x, dz=b.z-a.z, len=Math.hypot(dx,dz);
+      const seg=new THREE.Mesh(new THREE.BoxGeometry(W,0.03,len),
+        new THREE.MeshBasicMaterial({color:0x4a5563,transparent:true,opacity:0.85}));
+      seg.position.set((a.x+b.x)/2,0.015,(a.z+b.z)/2);
+      seg.rotation.y=Math.atan2(dx,dz);
+      eng.mapGroup.add(seg);
+    }
+    const s=this.trackW[0];
+    const gate=new THREE.Mesh(new THREE.CylinderGeometry(0.9,0.9,0.03,24),
+      new THREE.MeshBasicMaterial({color:0xef4444,transparent:true,opacity:0.55}));
+    gate.position.set(s.x,0.02,s.z); eng.mapGroup.add(gate);
+    const fin=new THREE.Mesh(new THREE.CylinderGeometry(1.0,1.0,0.03,24),
+      new THREE.MeshBasicMaterial({color:0x4ade80,transparent:true,opacity:0.55}));
+    fin.position.set(this.basePos.x,0.02,this.basePos.z); eng.mapGroup.add(fin);
   }
   baseSpotOk(c,r){
     if (c<4||r<4||c>G-6||r>G-6) return false;
@@ -1199,16 +1475,15 @@ TD.Game = class {
       if (this.groundMap[i]) return {ok:false,reason:'occupied'};
       if (this.stackH[i]>0) return {ok:true,cost,elev:this.stackH[i]}; // on a block: path unchanged
       if (this.bldgH&&this.bldgH[i]>0) return {ok:true,cost,elev:this.bldgH[i]}; // rooftop: path unchanged
-      return this.checkPathThenOk([ [c,r] ],cost);
+      return this.horde? {ok:true,cost} : this.checkPathThenOk([ [c,r] ],cost);
     }
     // blocks
-    if (this.blocks.length>=C.BLOCK_LIMIT) return {ok:false,reason:'limit'};
     if (def.id==='block'){
       if (this.towerMap[i]) return {ok:false,reason:'tower'};
       if (this.groundMap[i]) return {ok:false,reason:'occupied'};
       if (this.stackH[i]>=C.MAX_STACK) return {ok:false,reason:'stack'};
       if (this.stackH[i]>0) return {ok:true,cost};   // stacking on blocked cell
-      return this.checkPathThenOk([[c,r]],cost);
+      return this.horde? {ok:true,cost} : this.checkPathThenOk([[c,r]],cost);
     }
     // walkable ground pieces
     for (const [cc,rr] of cellsNeeded){
@@ -1276,11 +1551,69 @@ TD.Game = class {
     if (TD.ui) TD.ui.updateHUD();
     return true;
   }
+  /* SHIFT+click fill: covers the whole field, needs 500K gold, stacks over blocks */
+  bulkPlace(c,r){
+    if (!this.placing||this.placing.kind==='base') return;
+    const {kind,id}=this.placing;
+    const def=kind==='tower'? TD.TOWERS[id] : TD.BLOCKS[id];
+    const cost=this.costOf(kind,def);
+    if (this.gold<500000){ if(TD.ui) TD.ui.toast('SHIFT-FILL needs 500,000 gold'); TD.Audio.sfx('error'); return; }
+    let placed=0;
+    for(let rr=2;rr<G-2;rr++) for(let cc=2;cc<G-2;cc++){
+      if (this.gold<cost) break;
+      const i=idx(cc,rr);
+      if (isBorder(cc,rr)) continue;
+      if (this.towerMap[i]||this.groundMap[i]) continue;
+      const v=this.cells[i];
+      if (v===2) continue;
+      if (kind==='tower'){
+        if (v===1&&!(this.bldgH&&this.bldgH[i])) continue;
+        const elev=(this.stackH[i]||(this.bldgH&&this.bldgH[i])||0);
+        const t=new Tower(this,id,cc,rr,elev);
+        this.towers.push(t); this.towerMap[i]=t;
+        if (!this.stackH[i]&&!(this.bldgH&&this.bldgH[i])) this.cells[i]=3;
+        this.eng.applyCosmetics(t.model,id,t.tiers);
+        this.eng.dropIn(t.model);
+        this.gold-=cost; placed++;
+      } else if (def.id==='block'){
+        if (v===1) continue;
+        const model=this.eng.makeBlock(def.id);
+        const p=this.eng.cellToWorld(cc,rr);
+        const level=this.stackH[i];
+        model.position.set(p.x,level*1.51,p.z);
+        this.eng.mapGroup.add(model);
+        const b={ isBlock:true, def, c:cc, r:rr, model, uses:0, spent:cost, pos:p, cells:[[cc,rr]],
+          level, cd:0, openT:0, trapState:'idle', hp:(def.hp||0)*(this.hasPerk('reinforced')?2:1) };
+        model.userData.owner=b;
+        this.blocks.push(b);
+        this.stackH[i]++; this.cells[i]=3;
+        (this.cellStack[i]=this.cellStack[i]||[]).push(b);
+        this.eng.dropIn(model);
+        this.gold-=cost; placed++;
+      } else {
+        if (v!==0) continue;
+        const model=this.eng.makeBlock(def.id);
+        const p=this.eng.cellToWorld(cc,rr);
+        model.position.set(p.x,0,p.z);
+        this.eng.mapGroup.add(model);
+        const b={ isBlock:true, def, c:cc, r:rr, model, uses:def.uses||0, spent:cost, pos:p, cells:[[cc,rr]],
+          level:0, cd:0, openT:0, trapState:'idle', hp:(def.hp||0)*(this.hasPerk('reinforced')?2:1) };
+        model.userData.owner=b;
+        this.blocks.push(b);
+        this.cells[i]=5; this.groundMap[i]=b;
+        this.eng.dropIn(model);
+        this.gold-=cost; placed++;
+      }
+    }
+    this.rebuildField(); this.recomputeStats();
+    if (TD.ui){ TD.ui.updateHUD(); TD.ui.toast('SHIFT-FILL: '+placed+' '+def.name+(placed?' deployed (over blocks too)':' — nothing left to fill')); }
+    TD.Audio.sfx('place');
+  }
   placeError(r){
     return { occupied:'Space occupied', gold:'Not enough gold', tower:'A turret is up there',
       enemy:'A vehicle is in the way', seal:"Can't fully seal the base!", stack:'Max stack height ('+C.MAX_STACK+')',
       border:'Too close to the edge', bounds:'Out of bounds',
-      limit:'Block limit reached ('+C.BLOCK_LIMIT+') — sell some first' }[r]||'Can’t build there';
+      limit:'Block limit reached' }[r]||'Can’t build there';
   }
   /* ----- vehicles smashing player structures ----- */
   attackBlock(e,b){
@@ -1340,6 +1673,7 @@ TD.Game = class {
     } else {
       const i=idx(obj.c,obj.r);
       if (obj.planes) for (const p of obj.planes) this.eng.scene.remove(p.mesh);
+      if (obj.barUnits) for (const u of obj.barUnits) this.eng.mapGroup.remove(u.model);
       this.eng.scene.remove(obj.model);
       this.towers=this.towers.filter(x=>x!==obj);
       delete this.towerMap[i];
@@ -1487,7 +1821,7 @@ TD.Game = class {
   availableTypes(w){
     return Object.keys(TD.ENEMIES).filter(k=>{
       const d=TD.ENEMIES[k];
-      return !d.boss&&d.unlock<=w;
+      return !d.boss&&!d.vip&&d.unlock<=w;
     });
   }
   rollAffix(type){
@@ -1816,6 +2150,20 @@ TD.Game = class {
     if (TD.ui&&TD.ui.flash) TD.ui.flash(win?'green':'red',0.9);
     this.persist();
     if (TD.ui) TD.ui.showResults(win);
+  }
+
+  /* rewind one wave after a loss: 5 research, +1000 gold, fresh wave */
+  continueFromWave(){
+    if (this.state!=='lost'&&this.state!=='won') return;
+    this.wave=Math.max(0,this.wave-1);
+    this.gold+=1000;
+    this.baseHp=this.baseMaxHp; this.shield=this.shieldMax; this.shieldT=0;
+    for (const e of this.enemies||[]) this.eng.scene.remove(e.model);
+    this.enemies=[]; this.projectiles=[]; this.strikes=[]; this.crates=[];
+    this.spawnQueue=this.composeWave(this.wave); this.spawnT=0; this.waveActive=false;
+    this.paused=false; this.state='playing';
+    TD.Audio.sfx('gold');
+    this.eng.burst(this.basePos.clone().setY(1),0x4ade80,16,4,0.5,5);
   }
 
   /* ----- combat helpers ----- */
@@ -2235,7 +2583,7 @@ P.hostCmd=function(m){
 P.netMeta=function(){
   if (!TD.Net.connected||TD.Net.role!=='host'||!this.map) return;
   TD.Net.send({t:'meta', map:this.map.id, diff:this.diffId, loadout:this.loadout,
-    baseC:this.baseC, baseR:this.baseR});
+    horde:this.horde?1:0, track:this.track||null, baseC:this.baseC, baseR:this.baseR});
 };
 P.hostSync=function(dt){
   this.netT=(this.netT||0)-dt;
@@ -2285,7 +2633,12 @@ P.guestMeta=function(m){
     for (const p of (this.puppets.pr||[])) if(p.mesh) p.kind===1? this.eng.freeMissileMesh(p.mesh):this.freeShell(p.mesh);
   }
   this.map=TD.MAPS[m.map]; this.diffId=m.diff; this.diff=TD.DIFFICULTY[m.diff];
-  this.loadout=m.loadout;
+  this.loadout=m.loadout; this.horde=!!m.horde;
+  if (m.track&&m.track.length){
+    this.track=m.track;
+    this.trackW=m.track.map(([c,r])=>this.eng.cellToWorld(c,r));
+    if (this.trackW.length) this.drawTrack();
+  }
   this.eng.buildMap(this.map); this.eng.resetCam();
   this.puppets={en:new Map(),tw:new Map(),bl:new Map(),cr:new Map()};
   this.gold=0; this.wave=0; this.baseMaxHp=1; this.baseHp=1;

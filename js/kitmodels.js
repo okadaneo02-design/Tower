@@ -95,6 +95,7 @@ const VMAP={
   rammer:   { key:'truck',      len:1.9,  tint:0xd0543a, tintAmt:0.45 },
   digger:   { key:'tractor',    len:1.9,  tint:0x8a7f52, tintAmt:0.3 },
   boss:     { key:'tankboss',   len:2.4,  tint:0x54423a, tintAmt:0.4 },
+  boss3:    { key:'jet',        len:2.9,  tint:0x6e5a80, tintAmt:0.35 },
 };
 const _makeEnemyProc=E.makeEnemy;   // procedural fallback (moto, chopper, gunship, tank, boss)
 E.makeEnemy=function(type){
@@ -105,7 +106,8 @@ E.makeEnemy=function(type){
   const body=this.asset(map.key,{len:map.len,tint:map.tint,tintAmt:map.tintAmt});
   g.add(body);
   // bosses face the base they're attacking — reverse their models 180° on Y
-  if (type==='boss'||type==='boss2'||type==='boss3'||type==='bossH') body.rotation.y=Math.PI;
+  // (the jet keeps nose-forward so it flies correctly oriented)
+  if ((type==='boss'||type==='boss2'||type==='bossH')&&body) body.rotation.y=Math.PI;
   // kit bodies ship their own wheels as pivot nodes — spin those
   body.traverse(o=>{ if(/wheel/i.test(o.name)) parts.wheels.push(o); });
   g.userData.wheelAxis=body.userData.rotated? 'z':'x';
@@ -272,29 +274,81 @@ E.buildMap=function(map){
       }
     }
   }
-  // ---- nature dressing (never on New Tower City) ----
-  if (!TD.MODELS.tree||map.id===5) return grp;
+  // ---- per-map flavor: every map has its own terrain identity ----
+  const blocked=new Set((map._rocks||[]).map(([c,r])=>r*G+c));
   let seed=(map.seed*7+3)>>>0;
   const rnd=()=>{ seed=(seed+0x6D2B79F5)>>>0; let t=Math.imul(seed^(seed>>>15),1|seed);
     t=(t+Math.imul(t^(t>>>7),61|t))^t; return ((t^(t>>>14))>>>0)/4294967296; };
-  const kinds=map.id===2||map.id===4? ['crystal','rocks','tree'] : ['tree','tree','rocks'];
-  const blocked=new Set((map._rocks||[]).map(([c,r])=>r*G+c));
-  const n=map.id===1?8:14;
-  for(let i=0;i<n;i++){
-    // dress the outskirts so the build area stays visually clear
-    const edge=Math.floor(rnd()*4);
-    const depth=1+Math.floor(rnd()*3), along=2+Math.floor(rnd()*(G-4));
-    let c,r;
-    if (edge===0){ c=along; r=depth; } else if(edge===1){ c=along; r=G-1-depth; }
-    else if (edge===2){ c=depth; r=along; } else { c=G-1-depth; r=along; }
-    if (blocked.has(r*G+c)) continue;
-    const key=kinds[Math.floor(rnd()*kinds.length)];
-    const m=this.asset(key,{len:1.2+rnd()*0.9});
-    if (!m) continue;
-    const p=this.cellToWorld(c,r);
-    m.position.set(p.x+(rnd()-0.5)*0.8,0,p.z+(rnd()-0.5)*0.8);
-    m.rotation.y=rnd()*6.28;
-    grp.add(m);
+  const spot=()=>{ for(let i=0;i<40;i++){ const c=3+Math.floor(rnd()*(G-6)), r=3+Math.floor(rnd()*(G-6));
+    if (!blocked.has(r*G+c)) return [c,r]; } return null; };
+  const put=(m,x,z,rot)=>{ m.position.set(x,0,z); m.rotation.y=rot; grp.add(m); };
+  if (map.id===0){                                   // GREEN BASIN — rolling meadow
+    const kinds=['tree','tree','rocks'];
+    for(let i=0;i<14;i++){
+      const edge=Math.floor(rnd()*4), depth=1+Math.floor(rnd()*3), along=2+Math.floor(rnd()*(G-4));
+      let c,r; if(edge===0){c=along;r=depth;} else if(edge===1){c=along;r=G-1-depth;}
+      else if(edge===2){c=depth;r=along;} else {c=G-1-depth;r=along;}
+      if (blocked.has(r*G+c)) continue;
+      const m=this.asset(kinds[Math.floor(rnd()*kinds.length)],{len:1.2+rnd()*0.9});
+      if (m) put(m,this.cellToWorld(c,r).x+(rnd()-0.5)*0.8,this.cellToWorld(c,r).z+(rnd()-0.5)*0.8,rnd()*6.28);
+    }
+    for(let i=0;i<10;i++){ const s2=spot(); if(!s2) continue;
+      const m=this.asset('tree',{len:0.6+rnd()*0.4}); if(!m) continue;
+      const p=this.cellToWorld(s2[0],s2[1]);
+      put(m,p.x+(rnd()-0.5)*1.2,p.z+(rnd()-0.5)*1.2,rnd()*6.28); }         // bushes
+    const cols=[0xff8ab0,0xffd166,0x9ff0c8,0xff9f6e,0xd8a7ff];
+    for(let i=0;i<18;i++){ const s2=spot(); if(!s2) continue;
+      const p=this.cellToWorld(s2[0],s2[1]);
+      const fl=this.sph(0.06+rnd()*0.05,cols[i%cols.length],{e:0.4},6);
+      fl.position.set(p.x+(rnd()-0.5)*1.6,0.06,p.z+(rnd()-0.5)*1.6); grp.add(fl); } // wildflowers
+  } else if (map.id===1){                            // DUST FLATS — open desert with a dirt crossroads
+    const W=G*C.CELL;
+    const road=this.box(W*0.5,0.03,W,0xb5a468); road.position.y=0.012; grp.add(road);
+    const road2=this.box(W,0.03,W*0.5,0xb5a468); road2.position.y=0.014; grp.add(road2);
+    for(let i=0;i<14;i++){ const off=(i-7)*3.5;
+      const d1=this.box(0.5,0.035,0.16,0xe8e0c8); d1.position.set(off,0.02,0); grp.add(d1);
+      const d2=this.box(0.16,0.035,0.5,0xe8e0c8); d2.position.set(0,0.021,off); grp.add(d2); }
+    for(let i=0;i<7;i++){ const s2=spot(); if(!s2) continue;
+      const m=this.asset('rocks',{len:1.5+rnd()*1.3,tint:0xd8c98a,tintAmt:0.4}); if(!m) continue;
+      const p=this.cellToWorld(s2[0],s2[1]);
+      put(m,p.x+(rnd()-0.5)*1.4,p.z+(rnd()-0.5)*1.4,rnd()*6.28); }          // weathered dunes
+  } else if (map.id===2){                            // SALT MARSH — pools, reeds, crystal nests
+    for(let i=0;i<7;i++){ const s2=spot(); if(!s2) continue;
+      const p=this.cellToWorld(s2[0],s2[1]), r=0.8+rnd()*0.9;
+      const pool=this.cyl(r,r,0.06,0x5fb8d8,{o:0.88},16); pool.position.set(p.x,0.02,p.z); grp.add(pool);
+      const rim=this.torus(r+0.06,0.05,0x3d7a99,{o:0.5},14); rim.position.set(p.x,0.04,p.z); grp.add(rim); }
+    for(let i=0;i<14;i++){ const s2=spot(); if(!s2) continue;
+      const p=this.cellToWorld(s2[0],s2[1]);
+      const reed=this.cone(0.05,0.9,0x6f9f5a,{},5);
+      reed.position.set(p.x+(rnd()-0.5)*1.6,0.42,p.z+(rnd()-0.5)*1.6); grp.add(reed); }
+    for(let i=0;i<8;i++){ const s2=spot(); if(!s2) continue;
+      const m=this.asset('crystal',{len:0.8+rnd()*0.7}); if(!m) continue;
+      const p=this.cellToWorld(s2[0],s2[1]);
+      put(m,p.x+(rnd()-0.5)*1.2,p.z+(rnd()-0.5)*1.2,rnd()*6.28); }
+  } else if (map.id===3){                            // RUST VALLEY — vehicle graveyard + ore veins
+    const wrecks=['sedan','van','truck','suv'];
+    for(let i=0;i<7;i++){ const s2=spot(); if(!s2) continue;
+      const m=this.asset(wrecks[i%wrecks.length],{len:1.7,tint:0x6e4a35,tintAmt:0.75}); if(!m) continue;
+      const p=this.cellToWorld(s2[0],s2[1]);
+      m.position.set(p.x+(rnd()-0.5)*1.2,0,p.z+(rnd()-0.5)*1.2);
+      m.rotation.y=rnd()*6.28; if (rnd()<0.4) m.rotation.x=0.35; grp.add(m); }
+    for(let i=0;i<9;i++){ const s2=spot(); if(!s2) continue;
+      const p=this.cellToWorld(s2[0],s2[1]);
+      const ore=this.sph(0.14,0xff9c3d,{e:1.4},10);
+      ore.position.set(p.x+(rnd()-0.5)*1.4,0.14,p.z+(rnd()-0.5)*1.4); grp.add(ore);
+      const base2=this.sph(0.17,0x8a7a5c,{m:0.4},10);
+      base2.position.copy(ore.position); base2.position.y=0.05; grp.add(base2); }
+  } else if (map.id===4){                            // ASHFALL — scorched trees, embers, lava cracks
+    for(let i=0;i<12;i++){ const s2=spot(); if(!s2) continue;
+      const m=this.asset('tree',{len:1.1+rnd()*0.7,tint:0x2a2a2e,tintAmt:0.8}); if(!m) continue;
+      const p=this.cellToWorld(s2[0],s2[1]);
+      put(m,p.x+(rnd()-0.5)*1.3,p.z+(rnd()-0.5)*1.3,rnd()*6.28); }
+    for(let i=0;i<7;i++){ const s2=spot(); if(!s2) continue;
+      const p=this.cellToWorld(s2[0],s2[1]);
+      const crack=this.box(1.2+rnd()*0.8,0.04,0.06,0xff6b2a,{e:1.2});
+      crack.position.set(p.x,0.02,p.z); crack.rotation.y=rnd()*6.28; grp.add(crack);
+      const ember=this.sph(0.05,0xffa54d,{e:1.6},6);
+      ember.position.set(p.x+(rnd()-0.5)*0.8,0.05,p.z+(rnd()-0.5)*0.8); grp.add(ember); }
   }
   return grp;
 };

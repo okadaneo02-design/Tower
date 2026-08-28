@@ -159,10 +159,9 @@ button {
     letter-spacing: 10px;
     text-align: center;
     line-height: 1.05;
-    background: linear-gradient(180deg,#ffffff 20%, #ffd34d 60%, #ff9f6e 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: #ffd34d;
+    -webkit-text-stroke: 2px #a16207;
+    text-shadow: 0 3px 0 #92400e, 0 10px 26px rgba(255,170,50,.45), 0 0 46px rgba(255,150,60,.4);
 }
 
 .title-sub {
@@ -353,6 +352,35 @@ button {
     display: flex;
     gap: 10px;
     margin-bottom: 10px;
+}
+
+.mode-pill {
+    padding: 9px 22px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: #eaf6ff;
+    color: var(--dim);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all .12s;
+}
+
+.mode-pill:hover {
+    border-color: var(--accent2);
+}
+
+.mode-pill.sel-tds {
+    background: #e0f5ff;
+    color: #0369a1;
+    border-color: #7dd3fc;
+}
+
+.mode-pill.sel-horde {
+    background: #ffede0;
+    color: #c2410c;
+    border-color: #fdba74;
 }
 
 .mat-row {
@@ -2279,21 +2307,14 @@ kbd {
 .menu-screen .title-big {
     position: relative;
     z-index: 1;
-    background: linear-gradient(180deg,#ffffff 0%,#ffd34d 55%,#ff9f6e 100%);
-    background-size: 100% 100%;
-    -webkit-text-fill-color: transparent;
-    filter: drop-shadow(0 10px 24px rgba(255,170,50,.4));
+    color: #ffd34d;
+    -webkit-text-stroke: 2px #a16207;
+    text-shadow: 0 3px 0 #92400e, 0 10px 26px rgba(255,170,50,.5), 0 0 46px rgba(255,150,60,.45);
     animation: titleFloat 5s ease-in-out infinite;
 }
 @keyframes titleFloat {
     0%,100% { transform: translateY(0); }
     50% { transform: translateY(-6px); }
-}
-@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
-    .title-big {
-        -webkit-text-fill-color: initial;
-        color: #ffd34d;
-    }
 }
 
 .orb-ring {
