@@ -899,17 +899,17 @@ function buildTitle(){
     cv.addEventListener('wheel',e=>{ e.preventDefault(); eng.zoom(e.deltaY); },{passive:false});
     window.addEventListener('keydown',e=>{
       if (e.target.tagName==='INPUT') return;
-      const CHEAT=['ArrowLeft','ArrowLeft','ArrowLeft','ArrowRight','ArrowRight'];
-      if (CHEAT.includes(e.key)){
-        cheatSeq.push(e.key);
+      const CHEAT='=====';
+      if (e.key==='='||e.key==='+'){
+        cheatSeq.push('=');
         if (cheatSeq.length>5) cheatSeq.shift();
-        if (cheatSeq.join('')===CHEAT.join('')){
+        if (cheatSeq.join('')===CHEAT){
           cheatSeq=[];
           const inGame=game.state==='playing'||game.state==='prep';
           if (inGame){
-            game.gold+=9999999;
+            game.gold+=99999999;
             TD.Audio.sfx('gold');
-            toast('CHEAT CODE — +9,999,999 gold!');
+            toast('CHEAT CODE — INFINITE CASH!');
             updateHUD();
           } else {
             game.save.allMapsUnlocked=true;

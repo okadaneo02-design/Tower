@@ -82,6 +82,7 @@ class Tower {
     this.c=c; this.r=r; this.elev=elev||0;
     this.tiers=[0,0,0];
     this.spent=this.def.cost;
+    this.hp=Math.round(60+4*this.tiers.reduce((a,b)=>a+b,0));
     this.mode=0;
     this.cd=0; this.target=null; this.kills=0;
     this.model=game.eng.makeTower(id);
@@ -1042,7 +1043,9 @@ TD.Game = class {
   loadSave(){
     let s={};
     try{ s=JSON.parse(localStorage.getItem(C.SAVE_KEY))||{}; }catch(e){}
-    this.save=Object.assign({ research:0, tech:[], maps:{}, codes:[], skins:{scrap:[],metal:[],gold:[]}, settings:{sfx:0.7,mus:0.45,musicOn:false,dmgNums:true} }, s);
+    // progress reset gate: bump C.SAVE_VERSION to wipe every save on this device
+    if (s.sv!==C.SAVE_VERSION) s={ sv:C.SAVE_VERSION };
+    this.save=Object.assign({ sv:C.SAVE_VERSION, research:0, tech:[], maps:{}, codes:[], skins:{scrap:[],metal:[],gold:[]}, settings:{sfx:0.7,mus:0.45,musicOn:false,dmgNums:true} }, s);
     if (!this.save.codes) this.save.codes=[];
     if (!this.save.skins) this.save.skins={scrap:[],metal:[],gold:[]};
     if (!this.save.settings) this.save.settings={sfx:0.7,mus:0.45,musicOn:false,dmgNums:true};
@@ -1467,14 +1470,15 @@ TD.Game = class {
     const cost=this.costOf(kind,def);
     if (this.gold<cost) return {ok:false,reason:'gold'};
     const cellsNeeded=this.placeCellsFor(kind,id,c,r);
+    const rocksHit=[];
     for (const [cc,rr] of cellsNeeded){
       if (!inB(cc,rr)) return {ok:false,reason:'bounds'};
       if (isBorder(cc,rr)) return {ok:false,reason:'border'};
       const v=this.cells[idx(cc,rr)];
-      if (v===1||v===2){
-        if (kind==='tower'&&v===1&&this.bldgH&&this.bldgH[idx(cc,rr)]) continue; // rooftop slot
-        return {ok:false,reason:'occupied'};
-      }
+      if (v===2) return {ok:false,reason:'occupied'};
+      if (v===1&&!(this.bldgH&&this.bldgH[idx(cc,rr)])){ rocksHit.push(idx(cc,rr)); continue; } // clearable rock
+      if (v===1&&kind==='tower'&&this.bldgH&&this.bldgH[idx(cc,rr)]) continue; // rooftop slot
+      if (v===1) return {ok:false,reason:'occupied'};
     }
     const i=idx(c,r);
     if (kind==='tower'){
@@ -1482,7 +1486,14 @@ TD.Game = class {
       if (this.groundMap[i]) return {ok:false,reason:'occupied'};
       if (this.stackH[i]>0) return {ok:true,cost,elev:this.stackH[i]}; // on a block: path unchanged
       if (this.bldgH&&this.bldgH[i]>0) return {ok:true,cost,elev:this.bldgH[i]}; // rooftop: path unchanged
-      return this.horde? {ok:true,cost} : this.checkPathThenOk([ [c,r] ],cost);
+      if (rocksHit.length){
+        const old=rocksHit.map(ii=>this.cells[ii]);
+        rocksHit.forEach(ii=>this.cells[ii]=0);
+        const chk=this.horde||this.track? {ok:true,cost} : this.checkPathThenOk([ [c,r] ],cost);
+        if (!chk.ok) rocksHit.forEach((ii,k)=>{ this.cells[ii]=old[k]; });
+        return chk.ok? Object.assign(chk,{rocks:rocksHit}) : chk;
+      }
+      return this.horde||this.track? {ok:true,cost} : this.checkPathThenOk([ [c,r] ],cost);
     }
     // blocks
     if (def.id==='block'){
@@ -1490,14 +1501,21 @@ TD.Game = class {
       if (this.groundMap[i]) return {ok:false,reason:'occupied'};
       if (this.stackH[i]>=C.MAX_STACK) return {ok:false,reason:'stack'};
       if (this.stackH[i]>0) return {ok:true,cost};   // stacking on blocked cell
-      return this.horde? {ok:true,cost} : this.checkPathThenOk([[c,r]],cost);
+      if (rocksHit.length){
+        const old=rocksHit.map(ii=>this.cells[ii]);
+        rocksHit.forEach(ii=>this.cells[ii]=0);
+        const chk=this.horde||this.track? {ok:true,cost} : this.checkPathThenOk([[c,r]],cost);
+        if (!chk.ok) rocksHit.forEach((ii,k)=>{ this.cells[ii]=old[k]; });
+        return chk.ok? Object.assign(chk,{rocks:rocksHit}) : chk;
+      }
+      return this.horde||this.track? {ok:true,cost} : this.checkPathThenOk([[c,r]],cost);
     }
     // walkable ground pieces
     for (const [cc,rr] of cellsNeeded){
       const ii=idx(cc,rr);
-      if (this.cells[ii]!==0||this.towerMap[ii]||this.groundMap[ii]||this.stackH[ii]>0) return {ok:false,reason:'occupied'};
+      if (this.cells[ii]===2||this.towerMap[ii]||this.groundMap[ii]||this.stackH[ii]>0) return {ok:false,reason:'occupied'};
     }
-    return {ok:true,cost};
+    return {ok:true,cost,rocks:rocksHit.length?rocksHit:null};
   }
   checkPathThenOk(cellList,cost){
     for (const e of this.enemies){ if(e.dead||e.def.fly||e.absorbing) continue;

@@ -108,6 +108,7 @@ E.makeEnemy=function(type){
   // bosses face the base they're attacking — reverse their models 180° on Y
   // (the jet keeps nose-forward so it flies correctly oriented)
   if ((type==='boss'||type==='boss2'||type==='bossH')&&body) body.rotation.y=Math.PI;
+  if (type==='boss3'&&body) body.rotation.y+=Math.PI/2;   // jet tuned 90° CCW on Y
   // kit bodies ship their own wheels as pivot nodes — spin those
   body.traverse(o=>{ if(/wheel/i.test(o.name)) parts.wheels.push(o); });
   g.userData.wheelAxis=body.userData.rotated? 'z':'x';

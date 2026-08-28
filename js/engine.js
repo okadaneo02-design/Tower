@@ -241,12 +241,14 @@ TD.Engine = class {
 
     // terrain: rocks + mountain massifs
     const terr=TD.mapTerrain(map);
+    this.rockCells={};
     for (const [c,r] of terr.rocks){
       const p=this.cellToWorld(c,r);
       const rock=new THREE.Mesh(this.geo('rock',()=>new THREE.IcosahedronGeometry(1,0)), this.mat(map.pal.rock,{flat:true,r:0.9}));
       rock.position.set(p.x,0.5,p.z); rock.rotation.set(c,r,c+r);
       rock.scale.set(0.9+((c*7+r*13)%10)/20,0.6,0.9+((c*3+r*11)%10)/20);
       rock.castShadow=rock.receiveShadow=true; grp.add(rock);
+      this.rockCells[r*C.GRID+c]=[rock];
     }
     for (const cluster of terr.mtns) for (const [c,r] of cluster){
       const p=this.cellToWorld(c,r);
@@ -261,6 +263,7 @@ TD.Engine = class {
       const cap=new THREE.Mesh(this.geo('mesaC',()=>new THREE.CylinderGeometry(1.06,1.06,0.12,7)), this.mat(new THREE.Color(map.pal.ground).offsetHSL(0,-0.05,0.08).getHex(),{flat:true}));
       cap.position.set(p.x,h+0.06,p.z); cap.rotation.y=c*1.7+r+0.4;
       grp.add(cap);
+      this.rockCells[r*C.GRID+c]=[lower,upper,cap];
     }
     map._rocks=terr.rocks.concat(terr.mtns.flat());
 
@@ -1200,6 +1203,11 @@ TD.Engine = class {
   }
 
   /* ============ ghosts & indicators ============ */
+  removeRock(c,r){
+    const arr=this.rockCells&&this.rockCells[r*TD.CONFIG.GRID+c];
+    if (arr) for (const m of arr) this.mapGroup.remove(m);
+    if (this.rockCells) delete this.rockCells[r*TD.CONFIG.GRID+c];
+  }
   makeGhost(kind,id){
     const g = kind==='tower'? this.makeTower(id) : (kind==='base'? this.makeBase() : this.makeBlock(id));
     g.traverse(o=>{ if(o.isMesh){ o.material=o.material.clone(); o.material.transparent=true; o.material.opacity=0.55; o.castShadow=false; } });

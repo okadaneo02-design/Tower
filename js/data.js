@@ -23,7 +23,7 @@ TD.CONFIG = {
   ENEMY_HP_MUL: 0.85,         // balance: enemies are a little weaker
   ENEMY_SPD_MUL: 0.95,        // balance: enemies move a little slower
   START_GOLD_MUL: 1.33,       // balance: +33% starting cash
-  SAVE_KEY: 'towerDefenders.save.v2',
+  SAVE_KEY: 'towerDefenders.save.v2', SAVE_VERSION:2,
 };
 
 TD.DIFFICULTY = {
@@ -126,7 +126,7 @@ TD.ENEMIES = {
               roarCd:6, roarSpawn:'buggy', roarN:3, breakDmg:100 },
   boss2:    { name:'MECH TITAN', hp:2100,spd:0.40, gold:150,size:2.4,  color:0x8a97a5, unlock:10, armor:7, boss:true, heavy:true,
               roarCd:5, roarSpawn:'rammer', roarN:3, breakDmg:110 },
-  boss3:    { name:'SKY REAPER', hp:3800,spd:0.50, gold:220,size:2.8,  color:0x6e5a80, unlock:20, armor:8, boss:true, heavy:true, fly:true,
+  boss3:    { name:'SKY REAPER', hp:2700,spd:0.50, gold:190,size:2.8,  color:0x6e5a80, unlock:20, armor:6, boss:true, heavy:true, fly:true,
               roarCd:5, roarSpawn:'gunship', roarN:2, breakDmg:60 },
   bossH:    { name:'IRON APEX',  hp:4800,spd:0.34, gold:260,size:2.9,  color:0x4a4f57, unlock:30, armor:14, boss:true, heavy:true,
               roarCd:4.5, roarSpawn:'tank', roarN:2, breakDmg:200 },
@@ -184,7 +184,7 @@ minigun: { id:'minigun', name:'Minigun', role:'Charging rotary cannon', cost:260
     {name:'CROWNING GLORY',cost:1600,desc:'+30% rate, +2 dmg', mod:{rofMul:1.3, dmgAdd:2}}]}]},
 
 flame: { id:'flame', name:'Flamethrower', role:'Napalm spray', cost:180, slotCost:1, color:0xff6b3d, icon:'',
-  desc:'A long-range hose of fire. Burns the whole convoy — fire spreads from car to car.', targets:'g', arche:'flame', range:4.2, rof:2, dmg:4, cone:0.55, burnDps:8, burnDur:2.5, sfx:'flame',
+  desc:'A long-range hose of fire. Burns the whole convoy — fire spreads from car to car.', targets:'g', arche:'flame', range:4.2, rof:1.8, dmg:3, cone:0.5, burnDps:6, burnDur:2, sfx:'flame',
   paths:[
    {name:'Fuel', tiers:[
     {name:'Napalm',     cost:60,   desc:'+8 burn/s', mod:{burnDpsAdd:8}},
@@ -360,14 +360,14 @@ rail: { id:'rail', name:'Railgun', role:'Piercing beam', cost:228, slotCost:2, c
     {name:'Pure Annihilation',cost:800,desc:'+66 dmg', mod:{dmgAdd:66}}]}]},
 
 repair: { id:'repair', name:'Repair Station', role:'Base support', cost:134, slotCost:1, color:0xffd9a8, icon:'',
-  desc:'Drones patch the base hull over time.', targets:'b', arche:'repair', range:3, rof:0, dmg:0, heal:12, sfx:'none',
+  desc:'Drones patch the base hull over time.', targets:'b', arche:'repair', range:3, rof:0, dmg:0, heal:6, sfx:'none',
   paths:[
    {name:'Drone Speed', tiers:[
-    {name:'Fast Drones', cost:35,  desc:'+6 base HP/s', mod:{healAdd:6}},
-    {name:'Drone Swarm', cost:95, desc:'+9 base HP/s', mod:{healAdd:9}},
-    {name:'Nano Cloud',  cost:230, desc:'+15 base HP/s', mod:{healAdd:15}},
-    {name:'Drone Swarm II',cost:360,desc:'+12 base HP/s', mod:{healAdd:12}},
-    {name:'Nano Horde',  cost:560, desc:'+18 base HP/s', mod:{healAdd:18}}]},
+    {name:'Fast Drones', cost:35,  desc:'+3 base HP/s', mod:{healAdd:3}},
+    {name:'Drone Swarm', cost:95, desc:'+4 base HP/s', mod:{healAdd:4}},
+    {name:'Nano Cloud',  cost:230, desc:'+7 base HP/s', mod:{healAdd:7}},
+    {name:'Drone Swarm II',cost:360,desc:'+6 base HP/s', mod:{healAdd:6}},
+    {name:'Nano Horde',  cost:560, desc:'+9 base HP/s', mod:{healAdd:9}}]},
    {name:'Watch Systems', tiers:[
     {name:'Watchtower', cost:30,  desc:'Detects stealth nearby', mod:{detect:true}},
     {name:'Alarm Grid', cost:85, desc:'+2 detection radius', mod:{rangeAdd:2}},
@@ -375,11 +375,11 @@ repair: { id:'repair', name:'Repair Station', role:'Base support', cost:134, slo
     {name:'Sentry Grid', cost:320, desc:'Detects stealth, +1 radius', mod:{detect:true, rangeAdd:1}},
     {name:'Total Vigilance',cost:500,desc:'+2 detection radius', mod:{rangeAdd:2}}]},
    {name:'Hull Plating', tiers:[
-    {name:'Plating',    cost:45,  desc:'+10% max base HP', mod:{baseHpMul:1.10}},
-    {name:'Reinforce',  cost:120, desc:'+15% max base HP', mod:{baseHpMul:1.15}},
-    {name:'Aegis Shield',cost:270, desc:'Base gains a 400 HP shield', mod:{shieldAdd:400}},
-    {name:'Composite Hull',cost:420,desc:'+15% max base HP', mod:{baseHpMul:1.15}},
-    {name:'Fortress Frame',cost:640,desc:'+20% max base HP', mod:{baseHpMul:1.20}}]}]},
+    {name:'Plating',    cost:45,  desc:'+5% max base HP', mod:{baseHpMul:1.05}},
+    {name:'Reinforce',  cost:120, desc:'+7% max base HP', mod:{baseHpMul:1.07}},
+    {name:'Aegis Shield',cost:270, desc:'Base gains a 200 HP shield', mod:{shieldAdd:200}},
+    {name:'Composite Hull',cost:420,desc:'+7% max base HP', mod:{baseHpMul:1.07}},
+    {name:'Fortress Frame',cost:640,desc:'+10% max base HP', mod:{baseHpMul:1.10}}]}]},
 
 missile: { id:'missile', name:'Missile Battery', role:'Global homing volleys', cost:174, slotCost:2, color:0x9fb8f0, icon:'',
   desc:'Salvos that hunt their targets anywhere on the map. Takes 2 loadout slots.', targets:'b', arche:'missile', range:16, rof:0.6, dmg:10, volley:3, splash:0.7, sfx:'missile',
