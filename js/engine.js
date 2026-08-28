@@ -1157,6 +1157,48 @@ TD.Engine = class {
       if (d.life<=0) d.m.visible=false; } }
   }
 
+  /* ============ mini 3D turret portraits (equipping / placing) ============ */
+  renderPortrait(id){
+    if (!this._portCtx){
+      try{
+        const cv=document.createElement('canvas'); cv.width=96; cv.height=96;
+        const gl=cv.getContext('webgl',{antialias:true,alpha:true,preserveDrawingBuffer:true});
+        if (!gl) return null;
+        const r=new THREE.WebGLRenderer({canvas:cv,antialias:true,alpha:true,preserveDrawingBuffer:true});
+        r.setPixelRatio(1); r.setClearColor(0x000000,0);
+        const cam=new THREE.OrthographicCamera(-2,2,2,-2,0.1,20);
+        cam.position.set(2.6,2.6,3.2);
+        const sc=new THREE.Scene();
+        sc.add(new THREE.HemisphereLight(0xffffff,0x8899aa,0.9));
+        const s1=new THREE.DirectionalLight(0xffffff,0.9); s1.position.set(3,5,4); sc.add(s1);
+        const s2=new THREE.DirectionalLight(0xfff2cc,0.35); s2.position.set(-3,2,-4); sc.add(s2);
+        this._portCtx={cv,r,cam,sc};
+      }catch(e){ this._portCtx=null; return null; }
+    }
+    if (this.portraits&&this.portraits[id]) return this.portraits[id];
+    try{
+      const model=this.makeTower(id);
+      model.rotation.y=0.6;
+      model.traverse(o=>{ if(o.isMesh){ o.material=o.material.clone(); o.material.transparent=false; o.material.opacity=1; } });
+      const sc=this._portCtx.sc; sc.add(model);
+      const bb=new THREE.Box3().setFromObject(model);
+      const size=bb.getSize(new THREE.Vector3());
+      const c=bb.getCenter(new THREE.Vector3());
+      const m=Math.max(size.x,size.y,size.z,0.001);
+      const k=3.2/m;
+      const cam=this._portCtx.cam;
+      cam.left=-k; cam.right=k; cam.top=k; cam.bottom=-k;
+      cam.updateProjectionMatrix();
+      cam.lookAt(c.x,c.y,c.z);
+      this._portCtx.r.render(sc,cam);
+      const url=this._portCtx.cv.toDataURL('image/png');
+      sc.remove(model);
+      if (!this.portraits) this.portraits={};
+      this.portraits[id]=url;
+      return url;
+    }catch(e){ return null; }
+  }
+
   /* ============ ghosts & indicators ============ */
   makeGhost(kind,id){
     const g = kind==='tower'? this.makeTower(id) : (kind==='base'? this.makeBase() : this.makeBlock(id));

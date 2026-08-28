@@ -1040,6 +1040,7 @@ TD.Game = class {
     if (!this.save.codes) this.save.codes=[];
     if (!this.save.skins) this.save.skins={scrap:[],metal:[],gold:[]};
     if (!this.save.settings) this.save.settings={sfx:0.7,mus:0.45,musicOn:false,dmgNums:true};
+    if (this.save.settings.dark===undefined) this.save.settings.dark=true;   // dark mode default
     if (this.save.settings.musicInit===undefined){
       this.save.settings.musicOn=false;   // one-time migration to the new default: music OFF
       this.save.settings.musicInit=true;

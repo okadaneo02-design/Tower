@@ -6,6 +6,13 @@ TD.ui = (function(){
   const colorHex=c=>'#'+new THREE.Color(c).getHexString();
   const ART=TD.art;
   const artSpan=id=>'<span class="mic" style="background-image:url('+ART(id)+')"></span>';
+  const turretPortrait=def=>{
+    if (def&&TD.TOWERS[def.id]){
+      const u=(eng.portraits&&eng.portraits[def.id])||(eng.renderPortrait&&eng.renderPortrait(def.id));
+      if (u) return u;
+    }
+    return ART(def.id);
+  };
 
   let pickT=['mg','sniper'], pickB=['block','wire','trap'];
   let selMap=0, selDiff='normal', selEndless=false, selHorde=false;
@@ -37,6 +44,7 @@ TD.ui = (function(){
 
   /* ============ TITLE ============ */
 function buildTitle(){
+    applyTheme();
     const s=el('div','screen menu-screen');
     // orbiting showcase of your arsenal
     const orb=el('div','orb-ring');
@@ -212,7 +220,8 @@ function buildTitle(){
   function portrait(def){
     const p=el('div','tportrait');
     p.style.backgroundColor=colorHex(def.color);
-    p.style.backgroundImage='url('+ART(def.id)+')';
+    p.style.backgroundImage='url('+turretPortrait(def)+')';
+    if (TD.TOWERS[def.id]) p.style.backgroundSize='contain';
     return p;
   }
   function paintLoadout(){
@@ -420,7 +429,8 @@ function buildTitle(){
       b.append(el('div','key',HOTKEYS_T[i]));
       const p=el('div','bp');
       p.style.backgroundColor=colorHex(d.color);
-      p.style.backgroundImage='url('+ART(d.id)+')';
+      p.style.backgroundImage='url('+turretPortrait(d)+')';
+      p.style.backgroundSize='contain';
       b.append(p, el('div','bn',d.name.split(' ')[0]), el('div','bc','$'+d.cost));
       b.title=`${d.name} — ${d.role}\n${d.desc}`;
       b.onclick=()=>selectBuild('tower',id);
@@ -529,7 +539,8 @@ function buildTitle(){
       const head=el('div','tp-head');
       const p=el('div','tp-portrait');
       p.style.backgroundColor=colorHex(t.def.color);
-      p.style.backgroundImage='url('+ART(t.def.id)+')';
+      p.style.backgroundImage='url('+turretPortrait(t.def)+')';
+      if (TD.TOWERS[t.def.id]) p.style.backgroundSize='contain';
       head.append(p, el('div','',`<div class="tp-name">${t.def.name}</div><div class="tp-quip">${t.def.desc}</div>`));
       tp.append(head);
       if (t.def.uses) tp.append(el('div','tp-stats',`<span>uses left: <b>${t.uses}</b></span>`));
@@ -589,6 +600,11 @@ function buildTitle(){
     foot.append(tgt,sell); tp.append(foot);
   }
 
+  /* ============ DARK MODE ============ */
+  function applyTheme(){
+    const dark=game.save.settings.dark!==false;
+    document.body.classList.toggle('dark',dark);
+  }
   /* ============ overlays ============ */
   let overlayEl=null;
   function closeOverlay(){ if(overlayEl){ overlayEl.remove(); overlayEl=null; } }
@@ -667,6 +683,10 @@ function buildTitle(){
     const dBtn=el('button','btn small',game.save.settings.dmgNums?'ON':'OFF');
     dBtn.onclick=()=>{ game.save.settings.dmgNums=!game.save.settings.dmgNums; eng.showDmgNums=game.save.settings.dmgNums; dBtn.textContent=game.save.settings.dmgNums?'ON':'OFF'; game.persist(); };
     r3.append(dBtn); box.append(r3);
+    const rd=el('div','set-row'); rd.append(el('label','','Dark mode'));
+    const dkBtn=el('button','btn small',game.save.settings.dark!==false?'ON':'OFF');
+    dkBtn.onclick=()=>{ game.save.settings.dark=game.save.settings.dark===false; applyTheme(); dkBtn.textContent=game.save.settings.dark?'ON':'OFF'; game.persist(); };
+    rd.append(dkBtn); box.append(rd);
     // redeem codes
     const rc=el('div','set-row'); rc.append(el('label','','Redeem code'));
     const rcWrap=el('div','code-wrap');

@@ -2303,6 +2303,102 @@ kbd {
     outline-offset: 2px;
 }
 
+/* ============ DARK MODE (default, toggle in Settings) ============ */
+body.dark {
+    --bg: #0d1626;
+    --panel: #16233ae6;
+    --panel-solid: #0f1b30;
+    --line: #26405e;
+    --txt: #dbe7f5;
+    --dim: #86a0bb;
+    --shadow: 0 14px 34px rgba(0,0,0,.5);
+    background: #0d1626;
+    color: #dbe7f5;
+}
+body.dark .screen {
+    background: linear-gradient(180deg,#0c1526 0%,#12203a 55%,#1b2f3a 100%);
+}
+body.dark .screen.overlay {
+    background: rgba(8,13,24,.85);
+}
+body.dark .btn {
+    background: #1b2c47;
+    color: #dbe7f5;
+    border-color: #2b4a6e;
+}
+body.dark .btn:hover {
+    background: #24405f;
+    border-color: #3f6ea0;
+}
+body.dark .btn.primary {
+    background: linear-gradient(180deg,#2fbf5e,#178a41);
+    color: #04150b;
+}
+body.dark .btn.danger {
+    background: #3b1620;
+    border-color: #7f1d1d;
+    color: #fca5a5;
+}
+body.dark .tcard,
+body.dark .tech-node,
+body.dark .bslot,
+body.dark .diff-pill,
+body.dark .mode-pill {
+    background: #16263f;
+    border-color: #26405e;
+}
+body.dark .tcard:hover,
+body.dark .bslot:hover,
+body.dark .mode-pill:hover {
+    border-color: #3f6ea0;
+}
+body.dark .tcard.picked {
+    background: #0f2b1d;
+    border-color: #22c55e;
+}
+body.dark .tcard-gold {
+    background: #2b2410;
+}
+body.dark .tech-node.owned {
+    background: #0f2b1d;
+}
+body.dark .tech-node.affordable:not(.owned):hover {
+    background: #251b3d;
+}
+body.dark .diff-pill.sel-easy,
+body.dark .mode-pill.sel-tds {
+    background: #0f2b1d;
+    color: #6ee7a0;
+    border-color: #22c55e;
+}
+body.dark .diff-pill.sel-normal {
+    background: #0f2438;
+    color: #7dd3fc;
+    border-color: #0ea5e9;
+}
+body.dark .diff-pill.sel-hard {
+    background: #321420;
+    color: #fda4af;
+    border-color: #ef4444;
+}
+body.dark .mode-pill.sel-horde {
+    background: #33190e;
+    color: #fdba74;
+    border-color: #ea580c;
+}
+body.dark .icon-btn {
+    background: var(--panel);
+    color: var(--txt);
+}
+body.dark .icon-btn:hover {
+    border-color: #3f6ea0;
+}
+body.dark .code-input {
+    background: #0f1b30;
+    color: #dbe7f5;
+    border-color: #26405e;
+}
+
 /* ============ MAIN MENU — creative overhaul ============ */
 .menu-screen .title-big {
     position: relative;
