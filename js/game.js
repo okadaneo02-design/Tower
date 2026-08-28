@@ -648,14 +648,16 @@ class Tower {
 
 /* ---------- Enemy vehicle ---------- */
 class Enemy {
-  constructor(game,type,angle,wave,affix){
+  constructor(game,type,angle,wave,affix,opts){
     this.game=game; this.type=type; this.def=TD.ENEMIES[type];
+    const o=opts||{};
+    this.hpMul=o.hpMul||1; this.goldMul=o.goldMul||1; this.sizeMul=o.sizeMul||1;
     const diff=game.diff;
     this.affix=affix||null;
     const af=this.affix? TD.AFFIXES[this.affix] : null;
     const daily=game.daily;
     const hpScale=TD.scaleHp(wave)*diff.hpMul*C.ENEMY_HP_MUL*(this.def.boss? 1+(Math.floor(wave/10)-1)*1.2 : 1);
-    this.maxHp=Math.round(this.def.hp*hpScale*(af?af.hpMul:1)*(daily&&daily.mod.id==='brittle'?0.8:1));
+    this.maxHp=Math.round(this.def.hp*hpScale*this.hpMul*(af?af.hpMul:1)*(daily&&daily.mod.id==='brittle'?0.8:1));
     this.hp=this.maxHp;
     this.armor=(this.def.armor||0)+((af&&af.armorAdd)||0);
     this.speed=this.def.spd*diff.spdMul*C.ENEMY_SPD_MUL*((af&&af.spdMul)||1)*(daily&&daily.mod.id==='fast'?1.15:1)*C.CELL;
@@ -677,6 +679,10 @@ class Enemy {
     this.wp=null;
     this.model=game.eng.makeEnemy(type);
     this.model.userData.owner=this;
+    if (this.sizeMul>1){
+      this.model.userData.baseScale=(this.model.userData.baseScale||1.12)*this.sizeMul;
+      this.model.scale.multiplyScalar(this.sizeMul);
+    }
     this.model.position.copy(this.pos);
     game.eng.scene.add(this.model);
     if (this.stealth) game.eng.setStealth(this.model,true);
@@ -1860,6 +1866,27 @@ TD.Game = class {
       q.push({type:b,t:t+1.5,angle:this.rand()*Math.PI*2});
       if (w>=30) q.push({type: hard?'boss3':'boss2', t:t+4,angle:this.rand()*Math.PI*2});
     }
+    // graphics consolidation: low gfx swaps runs of weak cars for fewer, stronger ones
+    // (same total HP per merged group — never more)
+    const gfx=this.save&&this.save.settings? (this.save.settings.gfx===undefined?1:this.save.settings.gfx) : 1;
+    if (gfx<1&&q.length){
+      const K=Math.round(1+(1-gfx)*3);
+      const WEAK=new Set(['junker','buggy','moto','racer','prowler','rammer']);
+      const out=[];
+      let run=[];
+      const flush=()=>{
+        for (let i=0;i<run.length;i+=K){
+          const slice=run.slice(i,i+K);
+          if (slice.length===1) out.push(slice[0]);
+          else out.push(Object.assign({},slice[0],
+            {hpMul:slice.length,goldMul:slice.length,sizeMul:Math.sqrt(slice.length)}));
+        }
+        run=[];
+      };
+      for (const sp of q){ if (WEAK.has(sp.type)) run.push(sp); else { flush(); out.push(sp); } }
+      flush();
+      return out;
+    }
     return q;
   }
   startWave(){
@@ -2248,7 +2275,7 @@ TD.Game = class {
       }
     }
     this.runKills++;
-    let gold=Math.round(e.def.gold*this.diff.goldMul);
+    let gold=Math.round(e.def.gold*(e.goldMul||1)*this.diff.goldMul);
     for (const t of this.towers){
       if (t.stats&&t.stats.killGold){
         const dx=e.pos.x-t.pos.x,dz=e.pos.z-t.pos.z, rr=t.rangeW();
@@ -2482,7 +2509,7 @@ TD.Game = class {
       while (this.spawnQueue.length&&this.spawnQueue[0].t<=this.spawnT){
         const s=this.spawnQueue.shift();
         if (this.enemies.filter(e=>!e.dead).length<C.MAX_ENEMIES){
-          const e=new Enemy(this,s.type,s.angle,this.wave,this.rollAffix(s.type));
+          const e=new Enemy(this,s.type,s.angle,this.wave,this.rollAffix(s.type),s);
           this.enemies.push(e);
           if (TD.ENEMIES[s.type]&&TD.ENEMIES[s.type].boss){
             // escort shield vans: boss is near-invulnerable until they die

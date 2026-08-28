@@ -15,7 +15,7 @@ TD.ui = (function(){
   };
 
   let pickT=['mg','sniper'], pickB=['block','wire','trap'];
-  let selMap=0, selDiff='normal', selEndless=false, selHorde=false;
+  let selMap=0, selDiff='normal', selEndless=false, selHorde=true;
   let cheatSeq=[];
 
   function init(g,e){
@@ -675,6 +675,13 @@ function buildTitle(){
     };
     box.append(mk('SFX volume',TD.Audio.getSfxVol(),v=>{ TD.Audio.setSfxVol(v); game.save.settings.sfx=v; game.persist(); }));
     box.append(mk('Music volume',TD.Audio.getMusVol(),v=>{ TD.Audio.setMusVol(v); game.save.settings.mus=v; game.persist(); }));
+    const gfx0=game.save.settings.gfx===undefined?1:game.save.settings.gfx;
+    const gfxRow=el('div','set-row'); gfxRow.append(el('label','','Graphics — enemy count'));
+    const gfxLbl=el('b','gfx-lbl',gfx0>=1?'FULL CARS':(gfx0<=0?'CONSOLIDATED':Math.round(gfx0*100)+'%'));
+    const gfxInp=document.createElement('input'); gfxInp.type='range'; gfxInp.min=0; gfxInp.max=1; gfxInp.step=0.1; gfxInp.value=gfx0;
+    gfxInp.oninput=()=>{ game.save.settings.gfx=parseFloat(gfxInp.value); game.persist();
+      gfxLbl.textContent=game.save.settings.gfx>=1?'FULL CARS':(game.save.settings.gfx<=0?'CONSOLIDATED':Math.round(game.save.settings.gfx*100)+'%'); };
+    gfxRow.append(gfxInp,gfxLbl); box.append(gfxRow);
     const r2=el('div','set-row'); r2.append(el('label','','Music'));
     const mBtn=el('button','btn small',game.save.settings.musicOn?'ON':'OFF');
     mBtn.onclick=()=>{ game.save.settings.musicOn=!game.save.settings.musicOn; TD.Audio.setMusicOn(game.save.settings.musicOn); mBtn.textContent=game.save.settings.musicOn?'ON':'OFF'; game.persist(); };
